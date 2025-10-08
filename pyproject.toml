@@ -1,0 +1,21 @@
+[project]
+name = "langgraph-checkpoint-cassandra"
+version = "0.1.0"
+description = "LangGraph checkpointer for Cassandra"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "langgraph>=0.6.9",
+    "cassandra-driver",
+    "pandas",
+    "jupyter",
+    "matplotlib",
+    "numpy"
+]
+
+[build-system]
+requires = ["uv_build>=0.8.24,<0.9.0"]
+build-backend = "uv_build"
+
+[tool.uv.build-backend]
+module-root = ""
