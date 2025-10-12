@@ -1,5 +1,3 @@
-
-# --- Stage 1: Build virtual environment and install dependencies ---
 ARG BASE_IMAGE=ubuntu:24.04
 
 FROM ${BASE_IMAGE} AS builder
@@ -29,7 +27,6 @@ RUN --mount=type=cache,target=/opt/uv-cache \
 WORKDIR /app
 COPY --from=workspace pyproject.toml ./
 COPY --from=workspace uv.lock* ./
-# Conditionally copy lockfile if it exists
 RUN uv sync --no-install-project --no-dev
 WORKDIR /
 
@@ -53,6 +50,13 @@ RUN apt-get update && \
         gh && \
     ln -s /usr/bin/fdfind /usr/local/bin/fd && \
     ln -s /usr/bin/batcat /usr/local/bin/bat && \
+    rm -rf /var/lib/apt/lists/*
+
+# Install Node.js (for claude copilot VSCode extension)
+RUN apt-get update && \
+    apt-get install -y curl && \
+    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
+    apt-get install -y nodejs && \
     rm -rf /var/lib/apt/lists/*
 
 # User and group IDs for the non-root user
@@ -104,15 +108,9 @@ ENV UV_PROJECT_ENVIRONMENT=/opt/venv \
     UV_PYTHON_INSTALL_DIR=/python \
     UV_PYTHON_PREFERENCE=only-managed
 
-# Install claude
-RUN apt-get update && \
-    apt-get install -y curl && \
-    curl -fsSL https://deb.nodesource.com/setup_20.x | bash - && \
-    apt-get install -y nodejs && \
-    rm -rf /var/lib/apt/lists/* && \
-    npm install -g @anthropic-ai/claude-code && \
-    mkdir -p /home/${USERNAME}/.claude && \
-    chown -R ${USERNAME}:${USERNAME} /home/${USERNAME}/.claude
+USER ${USERNAME}
+RUN ["/bin/bash", "-c", "mkdir /home/${USERNAME}/.claude && set -o pipefail && curl -fsSL https://claude.ai/install.sh | bash"]
+USER root
 
 # Copy over python
 COPY --from=builder --chown=${USERNAME}:${USERNAME} /python /python

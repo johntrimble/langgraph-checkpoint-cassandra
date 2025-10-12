@@ -52,16 +52,13 @@ services:
     # Keep the container running (useful for VS Code dev containers, debugging, etc).
     command: tail -f /dev/null
 
-    # Uncomment below to run jupyter lab on startup
-    # command: jupyter lab --ip=0.0.0.0 --no-browser --NotebookApp.token='' --NotebookApp.password=''
-
     # Connect to the cassandra cluster
     depends_on:
       - cassandra
       
   # Single node Cassandra cluster
   cassandra:
-    image: cassandra:latest
+    image: cassandra:5.0
     ports:
       # Cassandra client port
       - "9042:9042"

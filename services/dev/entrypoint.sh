@@ -33,6 +33,17 @@ if [ ! -L "$DOCKER_USER_CACHE_DIR" ]; then
     ln -s "$DATA_CACHE_DIR" "$DOCKER_USER_CACHE_DIR"
 fi
 
+# Install the project in editable mode if pyproject.toml exists
+if [ -f "/workspace/pyproject.toml" ]; then
+    echo "Installing project in editable mode with uv..."
+    if cd /workspace && uv sync --quiet 2>/dev/null; then
+        echo "✓ Project installed successfully"
+    else
+        echo "⚠️  Warning: Failed to install project (uv sync failed)"
+        echo "   You may need to run 'uv sync' manually"
+    fi
+fi
+
 # Run any additional commands passed and replace the shell with the command
 if [ $# -gt 0 ]; then
     exec "$@"

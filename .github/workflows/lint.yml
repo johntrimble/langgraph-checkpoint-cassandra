@@ -1,0 +1,27 @@
+name: Lint
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Check formatting with ruff
+      run: |
+        docker compose run --rm dev ruff format --check .
+
+    - name: Lint with ruff
+      run: |
+        docker compose run --rm dev ruff check .
+
+    - name: Cleanup
+      if: always()
+      run: |
+        docker compose down -v

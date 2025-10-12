@@ -1,0 +1,48 @@
+name: Tests
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Start Cassandra with Docker Compose
+      run: |
+        docker compose up -d cassandra
+        echo "Cassandra started via Docker Compose"
+
+    - name: Wait for Cassandra
+      run: |
+        echo "Waiting for Cassandra to be ready..."
+        for i in {1..60}; do
+          if docker compose exec -T cassandra cqlsh -e "SELECT now() FROM system.local" > /dev/null 2>&1; then
+            echo "Cassandra is ready!"
+            exit 0
+          fi
+          echo "Waiting... ($i/60)"
+          sleep 2
+        done
+        echo "Cassandra failed to become ready in time"
+        docker compose logs cassandra
+        exit 1
+
+    - name: Run tests in dev container
+      run: |
+        docker compose run --rm dev pytest tests/ -v
+
+    - name: Show Cassandra logs on failure
+      if: failure()
+      run: |
+        docker compose logs cassandra
+
+    - name: Cleanup
+      if: always()
+      run: |
+        docker compose down -v

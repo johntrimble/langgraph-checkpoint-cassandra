@@ -1,5 +1,6 @@
 /data
 .env
+/reference_repositories
 
 # Python-generated files
 __pycache__/

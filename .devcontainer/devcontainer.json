@@ -11,6 +11,16 @@
   // The folder to open in the container.
   "workspaceFolder": "/workspace",
 
+  // Mount git config from host (cross-platform compatible)
+  "mounts": [
+    "source=${localEnv:HOME}${localEnv:USERPROFILE}/.gitconfig,target=/home/vscode/.gitconfig,type=bind,consistency=cached"
+  ],
+
+  // Environment variables for SSH agent forwarding
+  "remoteEnv": {
+    "SSH_AUTH_SOCK": "${localEnv:SSH_AUTH_SOCK}"
+  },
+
   // VS Code specific customizations.
   "customizations": {
     "vscode": {
