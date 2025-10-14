@@ -293,6 +293,50 @@ def test_multiple_threads(saver, sample_checkpoint, sample_metadata):
     assert result2.checkpoint["id"] == "thread-2-checkpoint"
 
 
+def test_list_many_checkpoints_with_writes(saver, sample_checkpoint, sample_metadata):
+    """Test listing many checkpoints with writes to verify batching works."""
+    config = {
+        "configurable": {
+            "thread_id": "test-thread-many",
+            "checkpoint_ns": "",
+        }
+    }
+
+    # Create 300 checkpoints (more than batch size of 250) with writes
+    num_checkpoints = 300
+    for i in range(num_checkpoints):
+        checkpoint_id = f"{i:032d}"
+        checkpoint = {**sample_checkpoint, "id": checkpoint_id}
+        saver.put(config, checkpoint, sample_metadata, {})
+
+        # Add writes to each checkpoint
+        config_with_id = {
+            "configurable": {
+                "thread_id": "test-thread-many",
+                "checkpoint_ns": "",
+                "checkpoint_id": checkpoint_id,
+            }
+        }
+        writes = [(f"channel_{i}", f"value_{i}")]
+        saver.put_writes(config_with_id, writes, f"task_{i}")
+
+    # List all checkpoints
+    checkpoints = list(saver.list(config))
+
+    # Verify count
+    assert len(checkpoints) == num_checkpoints
+
+    # Verify all checkpoints have their writes
+    for i, cp in enumerate(checkpoints):
+        # Checkpoints are ordered by ID descending, so reverse index
+        expected_idx = num_checkpoints - 1 - i
+        assert cp.checkpoint["id"] == f"{expected_idx:032d}"
+        assert cp.pending_writes is not None
+        assert len(cp.pending_writes) == 1
+        assert cp.pending_writes[0][1] == f"channel_{expected_idx}"
+        assert cp.pending_writes[0][2] == f"value_{expected_idx}"
+
+
 if __name__ == "__main__":
     """Run tests directly for debugging."""
     pytest.main([__file__, "-v"])

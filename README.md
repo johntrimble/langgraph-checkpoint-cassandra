@@ -111,6 +111,106 @@ CREATE TABLE checkpoint_writes (
 
 ## Advanced Features
 
+### Queryable Metadata (Server-Side Filtering)
+
+For efficient filtering on specific metadata fields, you can designate fields as "queryable" when creating the checkpointer. This creates dedicated columns for fast filtering, with optional SAI (Storage Attached Index) indexes for maximum performance.
+
+```python
+# Configure queryable metadata fields
+checkpointer = CassandraSaver(
+    session,
+    keyspace='my_checkpoints',
+    queryable_metadata={
+        "user_id": str,      # Text field for user IDs
+        "step": int,         # Integer field for step numbers
+        "source": str,       # Text field for source tracking
+        "tags": list,        # List of tags
+        "attributes": dict,  # Key-value attributes
+    },
+    indexed_metadata=["user_id", "source"]  # Only index these fields (optional)
+)
+checkpointer.setup()
+
+# Now you can filter efficiently on these fields
+config = {"configurable": {"thread_id": "my-thread"}}
+
+# Filter by user_id (server-side with SAI index, very fast)
+user_checkpoints = list(checkpointer.list(
+    config,
+    filter={"user_id": "user-123"}
+))
+
+# Filter by multiple fields (server-side)
+specific_checkpoints = list(checkpointer.list(
+    config,
+    filter={"user_id": "user-123", "source": "input"}
+))
+
+# Filter on list field with CONTAINS (checks if value is in list)
+tagged_checkpoints = list(checkpointer.list(
+    config,
+    filter={"tags": "python"}  # Matches checkpoints where "python" is in tags list
+))
+
+# Filter on dict field (checks if key-value pair exists)
+prod_checkpoints = list(checkpointer.list(
+    config,
+    filter={"attributes": {"env": "prod"}}  # Matches where attributes["env"] = "prod"
+))
+
+# Filter on dict field by value only (checks if value exists in any key)
+us_checkpoints = list(checkpointer.list(
+    config,
+    filter={"attributes": "us-east"}  # Matches where any value = "us-east"
+))
+
+# Mix queryable and non-queryable filters
+# Queryable fields use server-side filtering (fast)
+# Non-queryable fields use client-side filtering (slower)
+mixed = list(checkpointer.list(
+    config,
+    filter={
+        "user_id": "user-123",        # Server-side (queryable with index)
+        "step": 5,                    # Server-side (queryable without index, uses ALLOW FILTERING)
+        "custom_field": "value"       # Client-side (not queryable)
+    }
+))
+```
+
+**Supported types for queryable metadata:**
+- `str` - Text values
+- `int` - Integer values
+- `float` - Floating point values
+- `bool` - Boolean values
+- `dict` - Dictionary/map values (supports key-value and value-only filtering)
+- `list` - List values (supports CONTAINS operator)
+- `set` - Set values (supports CONTAINS operator)
+
+**Performance optimization with `indexed_metadata`:**
+- By default, all `queryable_metadata` fields get SAI indexes for maximum performance
+- Use `indexed_metadata` to specify a subset of fields to index (reduces storage overhead)
+- Non-indexed queryable fields still work but use `ALLOW FILTERING` (slightly slower)
+- This allows you to make many fields queryable while only indexing the most frequently filtered ones
+
+**Benefits:**
+- **Much faster filtering** when you have many checkpoints per thread
+- **Reduced network traffic** - only matching checkpoints are returned
+- **Scalable** - performance doesn't degrade with large checkpoint counts
+- **Flexible** - balance between query performance and storage overhead
+
+**When to use:**
+- Multi-tenant applications (filter by `user_id` or `tenant_id`)
+- Debugging (filter by `source` to find input vs loop checkpoints)
+- Step-based filtering (filter by `step` number)
+- Tag-based organization (filter by tags in a list)
+- Environment/configuration filtering (filter by key-value attributes)
+
+**Important notes:**
+- Queryable fields must be specified before calling `setup()`
+- Adding new queryable fields requires calling `setup()` again
+- Non-queryable metadata fields can still be filtered, but client-side (slower)
+- Collection types (list, set, dict) support CONTAINS operator for efficient membership testing
+
 ### TTL (Time To Live)
 
 Automatically expire old checkpoints:

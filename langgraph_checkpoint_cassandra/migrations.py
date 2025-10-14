@@ -41,8 +41,8 @@ DEFAULT_MIGRATIONS = {
                     type TEXT,
                     checkpoint BLOB,
                     metadata BLOB,
-                    PRIMARY KEY ((thread_id, checkpoint_ns), checkpoint_id)
-                ) WITH CLUSTERING ORDER BY (checkpoint_id DESC)
+                    PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id)
+                ) WITH CLUSTERING ORDER BY (checkpoint_ns ASC, checkpoint_id DESC)
                   AND compaction = {{'class': 'UnifiedCompactionStrategy'}}
                   AND gc_grace_seconds = 864000
             """).strip(),
@@ -57,17 +57,8 @@ DEFAULT_MIGRATIONS = {
                     channel TEXT,
                     type TEXT,
                     value BLOB,
-                    PRIMARY KEY ((thread_id, checkpoint_ns), checkpoint_id, task_id, idx)
-                ) WITH CLUSTERING ORDER BY (checkpoint_id DESC, task_id ASC, idx ASC)
-                  AND compaction = {{'class': 'UnifiedCompactionStrategy'}}
-                  AND gc_grace_seconds = 864000
-            """).strip(),
-            textwrap.dedent("""
-                CREATE TABLE IF NOT EXISTS {keyspace}.thread_namespaces (
-                    thread_id {thread_id_type},
-                    checkpoint_ns TEXT,
-                    PRIMARY KEY (thread_id, checkpoint_ns)
-                ) WITH CLUSTERING ORDER BY (checkpoint_ns ASC)
+                    PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id, task_id, idx)
+                ) WITH CLUSTERING ORDER BY (checkpoint_ns ASC, checkpoint_id DESC, task_id ASC, idx ASC)
                   AND compaction = {{'class': 'UnifiedCompactionStrategy'}}
                   AND gc_grace_seconds = 864000
             """).strip(),

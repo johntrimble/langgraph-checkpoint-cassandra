@@ -36,6 +36,55 @@ DEFAULT_CONTACT_POINTS = ["localhost"]
 DEFAULT_PORT = 9042
 
 
+def _python_type_to_cql_type(python_type: type) -> str:
+    """
+    Convert Python type to Cassandra CQL type string.
+
+    Args:
+        python_type: Python type (str, int, float, bool, dict, list, set)
+
+    Returns:
+        CQL type string
+
+    Raises:
+        ValueError: If type is not supported
+    """
+    type_mapping = {
+        str: "TEXT",
+        int: "BIGINT",
+        float: "DOUBLE",
+        bool: "BOOLEAN",
+    }
+
+    # Check simple types first
+    if python_type in type_mapping:
+        return type_mapping[python_type]
+
+    # Handle collection types - use non-frozen to enable CONTAINS operator
+    if hasattr(python_type, "__origin__"):
+        origin = python_type.__origin__
+        if origin is dict:
+            # For dict types, use map with text keys and values
+            return "MAP<TEXT, TEXT>"
+        elif origin is list:
+            return "LIST<TEXT>"
+        elif origin is set:
+            return "SET<TEXT>"
+
+    # Fallback for dict, list, set without type parameters
+    if python_type is dict:
+        return "MAP<TEXT, TEXT>"
+    elif python_type is list:
+        return "LIST<TEXT>"
+    elif python_type is set:
+        return "SET<TEXT>"
+
+    raise ValueError(
+        f"Unsupported type: {python_type}. "
+        f"Supported types are: str, int, float, bool, dict, list, set"
+    )
+
+
 class CassandraSaver(BaseCheckpointSaver):
     """
     Cassandra-based checkpoint saver implementation.
@@ -62,6 +111,8 @@ class CassandraSaver(BaseCheckpointSaver):
         ttl_seconds: int | None = None,
         read_consistency: ConsistencyLevel | None = ConsistencyLevel.LOCAL_QUORUM,
         write_consistency: ConsistencyLevel | None = ConsistencyLevel.LOCAL_QUORUM,
+        queryable_metadata: dict[str, type] | None = None,
+        indexed_metadata: list[str] | None = None,
     ) -> None:
         """
         Initialize the CassandraSaver.
@@ -77,6 +128,14 @@ class CassandraSaver(BaseCheckpointSaver):
                             Set to None to use session default.
             write_consistency: Consistency level for write operations (default: ConsistencyLevel.LOCAL_QUORUM).
                              Set to None to use session default.
+            queryable_metadata: Optional dictionary mapping metadata field names to their Python types.
+                              Fields specified here will have dedicated columns for server-side filtering.
+                              Supported types: str, int, float, bool, dict, list, set.
+                              Example: {"user_id": str, "step": int, "tags": list}
+            indexed_metadata: Optional list of field names from queryable_metadata that should have SAI indexes.
+                            If not specified, SAI indexes will be created for all queryable_metadata fields.
+                            Fields not indexed will use ALLOW FILTERING (slower but still works).
+                            Example: ["user_id", "step"] (creates indexes only for these fields)
 
         Note:
             You must call `.setup()` before using the checkpointer to create the required tables.
@@ -89,6 +148,19 @@ class CassandraSaver(BaseCheckpointSaver):
         self.ttl_seconds = ttl_seconds
         self.read_consistency = read_consistency
         self.write_consistency = write_consistency
+        self.queryable_metadata = queryable_metadata or {}
+
+        # If indexed_metadata not specified, index all queryable fields
+        if indexed_metadata is None:
+            self.indexed_metadata = set(self.queryable_metadata.keys())
+        else:
+            self.indexed_metadata = set(indexed_metadata)
+            # Validate that indexed fields are in queryable_metadata
+            invalid = self.indexed_metadata - self.queryable_metadata.keys()
+            if invalid:
+                raise ValueError(
+                    f"indexed_metadata contains fields not in queryable_metadata: {invalid}"
+                )
 
         self._statements_prepared = False
 
@@ -185,38 +257,6 @@ class CassandraSaver(BaseCheckpointSaver):
             WHERE thread_id = ? AND checkpoint_ns = ? AND checkpoint_id = ?
         """)
 
-        self.stmt_get_checkpoint_ids = self.session.prepare(f"""
-            SELECT checkpoint_id
-            FROM {self.keyspace}.checkpoints
-            WHERE thread_id = ? AND checkpoint_ns = ?
-        """)
-        
-        # Thread namespaces queries
-        if self.ttl_seconds is not None:
-            self.stmt_insert_namespace = self.session.prepare(f"""
-                INSERT INTO {self.keyspace}.thread_namespaces
-                (thread_id, checkpoint_ns)
-                VALUES (?, ?)
-                USING TTL {self.ttl_seconds}
-            """)
-        else:
-            self.stmt_insert_namespace = self.session.prepare(f"""
-                INSERT INTO {self.keyspace}.thread_namespaces
-                (thread_id, checkpoint_ns)
-                VALUES (?, ?)
-            """)
-            
-        self.stmt_get_thread_namespaces = self.session.prepare(f"""
-            SELECT checkpoint_ns
-            FROM {self.keyspace}.thread_namespaces
-            WHERE thread_id = ?
-        """)
-        
-        self.stmt_delete_thread_namespace = self.session.prepare(f"""
-            DELETE FROM {self.keyspace}.thread_namespaces
-            WHERE thread_id = ? AND checkpoint_ns = ?
-        """)
-
         # Set consistency levels on prepared statements
         if self.read_consistency is not None:
             # Read statements
@@ -225,8 +265,6 @@ class CassandraSaver(BaseCheckpointSaver):
             self.stmt_list_checkpoints.consistency_level = self.read_consistency
             self.stmt_list_checkpoints_before.consistency_level = self.read_consistency
             self.stmt_get_writes.consistency_level = self.read_consistency
-            self.stmt_get_checkpoint_ids.consistency_level = self.read_consistency
-            self.stmt_get_thread_namespaces.consistency_level = self.read_consistency
 
         if self.write_consistency is not None:
             # Write statements
@@ -234,8 +272,6 @@ class CassandraSaver(BaseCheckpointSaver):
             self.stmt_delete_checkpoints.consistency_level = self.write_consistency
             self.stmt_insert_write.consistency_level = self.write_consistency
             self.stmt_delete_writes.consistency_level = self.write_consistency
-            self.stmt_insert_namespace.consistency_level = self.write_consistency
-            self.stmt_delete_thread_namespace.consistency_level = self.write_consistency
 
         self._statements_prepared = True
 
@@ -318,9 +354,66 @@ class CassandraSaver(BaseCheckpointSaver):
         else:
             logger.info("✓ Schema is up to date")
 
+        # Add queryable metadata columns and indexes if specified
+        if self.queryable_metadata:
+            logger.info(f"Setting up queryable metadata fields: {list(self.queryable_metadata.keys())}")
+            self._setup_queryable_metadata()
+
         # Prepare statements now that tables exist
         self._prepare_statements()
         logger.info("✓ Checkpoint schema ready")
+
+    def _setup_queryable_metadata(self) -> None:
+        """
+        Create columns and optionally SAI indexes for queryable metadata fields.
+
+        This method is called during setup() if queryable_metadata is specified.
+        It adds columns prefixed with "metadata__" and creates SAI indexes
+        only for fields specified in indexed_metadata.
+        """
+        for field_name, field_type in self.queryable_metadata.items():
+            column_name = f"metadata__{field_name}"
+
+            try:
+                # Get CQL type for this field
+                cql_type = _python_type_to_cql_type(field_type)
+
+                # Add column if it doesn't exist
+                # Using IF NOT EXISTS would be nice but ALTER TABLE doesn't support it
+                # So we try to add and ignore errors if column exists
+                try:
+                    alter_stmt = f"""
+                        ALTER TABLE {self.keyspace}.checkpoints
+                        ADD {column_name} {cql_type}
+                    """
+                    self.session.execute(alter_stmt)
+                    logger.info(f"  ✓ Added column: {column_name} ({cql_type})")
+                except Exception as e:
+                    # Column likely already exists, which is fine
+                    if "conflicts with an existing column" in str(e) or "already exists" in str(e).lower():
+                        logger.debug(f"  → Column {column_name} already exists")
+                    else:
+                        logger.warning(f"  ⚠ Could not add column {column_name}: {e}")
+
+                # Create SAI index only if this field is in indexed_metadata
+                if field_name in self.indexed_metadata:
+                    index_name = f"idx_{column_name}"
+                    try:
+                        create_index_stmt = f"""
+                            CREATE CUSTOM INDEX IF NOT EXISTS {index_name}
+                            ON {self.keyspace}.checkpoints ({column_name})
+                            USING 'StorageAttachedIndex'
+                        """
+                        self.session.execute(create_index_stmt)
+                        logger.info(f"  ✓ Created SAI index: {index_name}")
+                    except Exception as e:
+                        logger.debug(f"  → Index {index_name} setup: {e}")
+                else:
+                    logger.info(f"  → Column {column_name} created without index (will use ALLOW FILTERING)")
+
+            except ValueError as e:
+                logger.error(f"  ✗ Invalid type for field '{field_name}': {e}")
+                raise
 
     @staticmethod
     def _to_uuid(checkpoint_id: str | None) -> UUID | None:
@@ -498,41 +591,147 @@ class CassandraSaver(BaseCheckpointSaver):
         thread_id = self._convert_thread_id(thread_id_str)
         checkpoint_ns = config["configurable"].get("checkpoint_ns", "")
 
-        # Query checkpoints
-        if before:
-            before_id_str = before["configurable"]["checkpoint_id"]
-            before_id_uuid = self._to_uuid(before_id_str)
-            before_id_param = str(before_id_uuid) if before_id_uuid else None
-            result = self.session.execute(
-                self.stmt_list_checkpoints_before,
-                (thread_id, checkpoint_ns, before_id_param),
-            )
-        else:
-            result = self.session.execute(
-                self.stmt_list_checkpoints, (thread_id, checkpoint_ns)
-            )
+        # Separate queryable and non-queryable metadata filters
+        server_side_filters = {}
+        client_side_filters = {}
 
-        # Process results
+        if filter:
+            for key, value in filter.items():
+                if key in self.queryable_metadata:
+                    server_side_filters[key] = value
+                else:
+                    client_side_filters[key] = value
+
+        # Query checkpoints with server-side filtering if applicable
+        if server_side_filters:
+            # Build dynamic query with metadata filters
+            query_parts = [f"SELECT * FROM {self.keyspace}.checkpoints WHERE thread_id = ? AND checkpoint_ns = ?"]
+            query_params = [thread_id, checkpoint_ns]
+            needs_allow_filtering = False
+
+            # Add server-side metadata filters
+            for field_name, field_value in server_side_filters.items():
+                column_name = f"metadata__{field_name}"
+                field_type = self.queryable_metadata[field_name]
+
+                # Check if filtering on a non-indexed field
+                if field_name not in self.indexed_metadata:
+                    needs_allow_filtering = True
+
+                # For collection types (list, set, map), use CONTAINS
+                if field_type in (list, set) or (hasattr(field_type, "__origin__") and field_type.__origin__ in (list, set)):
+                    query_parts.append(f"AND {column_name} CONTAINS ?")
+                    query_params.append(field_value)
+                elif field_type is dict or (hasattr(field_type, "__origin__") and field_type.__origin__ is dict):
+                    # For maps, check if filtering by key or value
+                    # If field_value is a dict, check if keys exist
+                    if isinstance(field_value, dict):
+                        # PostgreSQL @> behavior: check if all key-value pairs exist
+                        # Note: map[key] = value syntax requires ALLOW FILTERING even with SAI index
+                        needs_allow_filtering = True
+                        for k, v in field_value.items():
+                            query_parts.append(f"AND {column_name}[?] = ?")
+                            query_params.extend([k, v])
+                    else:
+                        # Single value: check if it exists in map values
+                        query_parts.append(f"AND {column_name} CONTAINS ?")
+                        query_params.append(field_value)
+                else:
+                    # Scalar types: use equality
+                    query_parts.append(f"AND {column_name} = ?")
+                    query_params.append(field_value)
+
+            # Add before filter if specified
+            if before:
+                before_id_str = before["configurable"]["checkpoint_id"]
+                before_id_uuid = self._to_uuid(before_id_str)
+                before_id_param = str(before_id_uuid) if before_id_uuid else None
+                query_parts.append("AND checkpoint_id < ?")
+                query_params.append(before_id_param)
+
+            # Only add ALLOW FILTERING if filtering on non-indexed fields
+            query = " ".join(query_parts)
+            if needs_allow_filtering:
+                query += " ALLOW FILTERING"
+
+            prepared_query = self.session.prepare(query)
+            result = self.session.execute(prepared_query, query_params)
+        else:
+            # Use prepared statements for standard queries
+            if before:
+                before_id_str = before["configurable"]["checkpoint_id"]
+                before_id_uuid = self._to_uuid(before_id_str)
+                before_id_param = str(before_id_uuid) if before_id_uuid else None
+                result = self.session.execute(
+                    self.stmt_list_checkpoints_before,
+                    (thread_id, checkpoint_ns, before_id_param),
+                )
+            else:
+                result = self.session.execute(
+                    self.stmt_list_checkpoints, (thread_id, checkpoint_ns)
+                )
+
+        # Collect checkpoints that pass client-side filters
+        checkpoints_to_return = []
         count = 0
+
         for row in result:
             # Deserialize
             checkpoint = self.serde.loads_typed((row.type, row.checkpoint))
             metadata = self.serde.loads(row.metadata)
 
-            # Apply metadata filter if provided (client-side)
-            if filter:
-                if not all(metadata.get(k) == v for k, v in filter.items()):
+            # Apply client-side metadata filters (for non-queryable fields)
+            if client_side_filters:
+                if not all(metadata.get(k) == v for k, v in client_side_filters.items()):
                     continue
 
-            # Get pending writes
-            writes_result = self.session.execute(
-                self.stmt_get_writes, (thread_id, checkpoint_ns, row.checkpoint_id)
+            checkpoints_to_return.append((row, checkpoint, metadata))
+            count += 1
+            if limit and count >= limit:
+                break
+
+        if not checkpoints_to_return:
+            return
+
+        # Batch fetch writes for all checkpoints
+        checkpoint_ids = [row.checkpoint_id for row, _, _ in checkpoints_to_return]
+
+        # Fetch writes in batches of 250 to avoid too large IN queries
+        BATCH_SIZE = 250
+        all_writes = []
+
+        for i in range(0, len(checkpoint_ids), BATCH_SIZE):
+            batch_ids = checkpoint_ids[i:i+BATCH_SIZE]
+
+            # Prepare query with IN clause for this batch
+            batch_query = self.session.prepare(f"""
+                SELECT checkpoint_id, task_id, task_path, idx, channel, type, value
+                FROM {self.keyspace}.checkpoint_writes
+                WHERE thread_id = ? AND checkpoint_ns = ? AND checkpoint_id IN ?
+            """)
+
+            batch_result = self.session.execute(
+                batch_query,
+                (thread_id, checkpoint_ns, batch_ids)
+            )
+            all_writes.extend(batch_result)
+
+        # Group writes by checkpoint_id
+        writes_by_checkpoint = {}
+        for write_row in all_writes:
+            checkpoint_id_key = str(write_row.checkpoint_id)
+            if checkpoint_id_key not in writes_by_checkpoint:
+                writes_by_checkpoint[checkpoint_id_key] = []
+
+            value = self.serde.loads_typed((write_row.type, write_row.value))
+            writes_by_checkpoint[checkpoint_id_key].append(
+                (write_row.task_id, write_row.channel, value)
             )
 
-            pending_writes = []
-            for write_row in writes_result:
-                value = self.serde.loads_typed((write_row.type, write_row.value))
-                pending_writes.append((write_row.task_id, write_row.channel, value))
+        # Yield checkpoints with their writes
+        for row, checkpoint, metadata in checkpoints_to_return:
+            checkpoint_id_key = str(row.checkpoint_id)
+            pending_writes = writes_by_checkpoint.get(checkpoint_id_key, [])
 
             # Build parent config
             parent_config = None
@@ -558,11 +757,6 @@ class CassandraSaver(BaseCheckpointSaver):
                 parent_config=parent_config,
                 pending_writes=pending_writes if pending_writes else None,
             )
-
-            # Apply limit
-            count += 1
-            if limit and count >= limit:
-                break
 
     def put(
         self,
@@ -601,24 +795,53 @@ class CassandraSaver(BaseCheckpointSaver):
         # Insert checkpoint
         logging.info(f"Checkpoint ID type: {self.checkpoint_id_type}, value: {checkpoint_id_param}, typeof: {type(checkpoint_id_param)}")
         logging.info(f"Parent Checkpoint ID type: {self.checkpoint_id_type}, value: {parent_checkpoint_id_param}, typeof: {type(parent_checkpoint_id_param)}")
-        self.session.execute(
-            self.stmt_insert_checkpoint,
-            (
-                thread_id_param,
-                checkpoint_ns,
-                checkpoint_id_param,
-                parent_checkpoint_id_param,
-                type_str,
-                checkpoint_blob,
-                metadata_blob,
+
+        # If queryable metadata is specified, we need to use dynamic query
+        if self.queryable_metadata:
+            # Build column list and values
+            columns = ["thread_id", "checkpoint_ns", "checkpoint_id", "parent_checkpoint_id", "type", "checkpoint", "metadata"]
+            params = [thread_id_param, checkpoint_ns, checkpoint_id_param, parent_checkpoint_id_param, type_str, checkpoint_blob, metadata_blob]
+
+            # Add queryable metadata columns and values
+            for field_name in self.queryable_metadata:
+                column_name = f"metadata__{field_name}"
+                columns.append(column_name)
+                # Extract value from metadata, or None if not present
+                field_value = metadata.get(field_name)
+                params.append(field_value)
+
+            # Build INSERT statement
+            placeholders = ", ".join(["?"] * len(columns))
+            column_list = ", ".join(columns)
+
+            if self.ttl_seconds is not None:
+                insert_query = f"""
+                    INSERT INTO {self.keyspace}.checkpoints ({column_list})
+                    VALUES ({placeholders})
+                    USING TTL {self.ttl_seconds}
+                """
+            else:
+                insert_query = f"""
+                    INSERT INTO {self.keyspace}.checkpoints ({column_list})
+                    VALUES ({placeholders})
+                """
+
+            prepared_stmt = self.session.prepare(insert_query)
+            self.session.execute(prepared_stmt, params)
+        else:
+            # Use regular prepared statement
+            self.session.execute(
+                self.stmt_insert_checkpoint,
+                (
+                    thread_id_param,
+                    checkpoint_ns,
+                    checkpoint_id_param,
+                    parent_checkpoint_id_param,
+                    type_str,
+                    checkpoint_blob,
+                    metadata_blob,
+                )
             )
-        )
-        
-        # Track namespace
-        self.session.execute(
-            self.stmt_insert_namespace,
-            (thread_id_param, checkpoint_ns)
-        )
 
         return {
             "configurable": {
@@ -669,69 +892,49 @@ class CassandraSaver(BaseCheckpointSaver):
                 )
             )
 
-        # Track namespace
-        self.session.execute(
-            self.stmt_insert_namespace,
-            (thread_id_param, checkpoint_ns)
-        )
-
     def delete_thread(self, thread_id_str: str) -> None:
         """
         Delete all checkpoints and writes for a thread across all namespaces.
-        
-        This method uses the thread_namespaces table to find all namespaces 
-        associated with this thread, and deletes data from all of them.
+
+        With the new schema where thread_id is the partition key, this is a simple
+        partition delete that removes all data for the thread in both tables.
 
         Args:
             thread_id_str: The thread ID whose checkpoints should be deleted
         """
+        from cassandra.query import BatchStatement, BatchType
+
         self._prepare_statements()  # Ensure statements are prepared
         thread_id = self._convert_thread_id(thread_id_str)
-        
+
         # Convert UUIDs to strings for Cassandra statements if needed
         if self.thread_id_type in ("uuid", "timeuuid") and isinstance(thread_id, UUID):
             thread_id_param = str(thread_id)
         else:
             thread_id_param = thread_id
-            
-        # Get all namespaces for this thread
-        namespace_result = self.session.execute(
-            self.stmt_get_thread_namespaces, (thread_id_param,)
-        )
-        
-        namespaces = [row.checkpoint_ns for row in namespace_result]
-        
-        # If no namespaces found, nothing to delete
-        if not namespaces:
-            return
-            
-        logger.info(f"Deleting thread {thread_id_str} from {len(namespaces)} namespaces")
-        
-        # For each namespace, delete all associated data
-        for checkpoint_ns in namespaces:
-            # Get all checkpoint IDs for this thread and namespace
-            result = self.session.execute(
-                self.stmt_get_checkpoint_ids, (thread_id_param, checkpoint_ns)
-            )
-            
-            checkpoint_ids = [row.checkpoint_id for row in result]
-            
-            # Execute individual statements instead of a batch to avoid UUID encoding issues
-            
-            # Delete all checkpoint writes
-            for checkpoint_id in checkpoint_ids:
-                checkpoint_id_param = str(checkpoint_id) if checkpoint_id else None
-                self.session.execute(self.stmt_delete_writes, (thread_id_param, checkpoint_ns, checkpoint_id_param))
-                
-            # Delete all checkpoints in this namespace
-            self.session.execute(self.stmt_delete_checkpoints, (thread_id_param, checkpoint_ns))
-            
-            # Delete the namespace entry
-            self.session.execute(self.stmt_delete_thread_namespace, (thread_id_param, checkpoint_ns))
-            
-            logger.debug(f"Deleted {len(checkpoint_ids)} checkpoints in namespace '{checkpoint_ns}'")
-            
-        logger.info(f"Successfully deleted thread {thread_id_str} data")
+
+        logger.info(f"Deleting thread {thread_id_str}")
+
+        # Use a logged batch to delete from both tables atomically
+        # Since thread_id is now the partition key, these are efficient partition deletes
+        batch = BatchStatement(batch_type=BatchType.LOGGED)
+
+        # Delete all checkpoints for this thread
+        delete_checkpoints_stmt = self.session.prepare(f"""
+            DELETE FROM {self.keyspace}.checkpoints WHERE thread_id = ?
+        """)
+        batch.add(delete_checkpoints_stmt, (thread_id_param,))
+
+        # Delete all checkpoint writes for this thread
+        delete_writes_stmt = self.session.prepare(f"""
+            DELETE FROM {self.keyspace}.checkpoint_writes WHERE thread_id = ?
+        """)
+        batch.add(delete_writes_stmt, (thread_id_param,))
+
+        # Execute the batch
+        self.session.execute(batch)
+
+        logger.info(f"Successfully deleted thread {thread_id_str}")
 
     # Async methods
     async def aget_tuple(self, config: RunnableConfig) -> CheckpointTuple | None:
