@@ -166,7 +166,8 @@ pytest
 ### 4. Format Code
 
 ```bash
-ruff check langgraph_checkpoint_cassandra tests examples
+ruff check --fix
+ruff format
 ```
 
 ### 5. Commit Changes
@@ -184,36 +185,6 @@ git push origin feature/your-feature-name
 
 Then create a Pull Request on GitHub.
 
-## Adding New Features
-
-### Adding a New Method
-
-1. Add method to `CassandraSaver` class in `cassandra_saver.py`
-2. Add corresponding CQL prepared statement in `_prepare_statements()`
-3. Implement both sync and async versions
-4. Add tests in `test_cassandra_saver.py`
-5. Update documentation
-
-Example:
-
-```python
-# In cassandra_saver.py
-def _prepare_statements(self) -> None:
-    # ... existing statements ...
-    self.stmt_new_operation = self.session.prepare(f"""
-        SELECT ... FROM {self.keyspace}.table_name WHERE ...
-    """)
-
-def new_operation(self, arg1, arg2):
-    """New operation description."""
-    result = self.session.execute(self.stmt_new_operation, (arg1, arg2))
-    return process_result(result)
-
-async def anew_operation(self, arg1, arg2):
-    """Async version of new_operation."""
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(None, self.new_operation, arg1, arg2)
-```
 
 ### Adding Schema Changes
 
@@ -226,6 +197,7 @@ Schema changes should be made through the migration system:
 
 Note: The migration system is internal - users just call `.setup()` which applies all migrations automatically.
 
+
 ## Debugging
 
 ### Enable Debug Logging
@@ -237,6 +209,7 @@ logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger('cassandra')
 logger.setLevel(logging.DEBUG)
 ```
+
 
 ### Inspect Cassandra Data
 
@@ -256,136 +229,6 @@ cqlsh> DESCRIBE TABLES;
 # Query data
 cqlsh> SELECT * FROM checkpoints;
 ```
-
-### Common Issues
-
-**Issue: Cassandra not ready**
-```
-cassandra.cluster.NoHostAvailable: ('Unable to connect to any servers', ...)
-```
-
-Solution: Wait for Cassandra to fully start (30-60 seconds):
-```bash
-docker-compose logs cassandra
-# Wait for "Created default superuser role 'cassandra'"
-```
-
-**Issue: Schema already exists**
-```
-cassandra.AlreadyExists: Keyspace 'langgraph_checkpoints' already exists
-```
-
-Solution: Schema creation is idempotent via `.setup()` - the method is safe to call multiple times.
-
-**Issue: Connection timeout in tests**
-```
-cassandra.OperationTimedOut: errors={...}, last_host=...
-```
-
-Solution: Increase timeout or wait for schema agreement:
-```python
-session.default_timeout = 30
-```
-
-## Code Style
-
-We follow these conventions:
-
-- **PEP 8** for Python code style
-- **Black** for code formatting (line length: 100)
-- **isort** for import sorting
-- **Type hints** for all public APIs
-- **Docstrings** for all public functions/classes (Google style)
-
-Example:
-
-```python
-def put(
-    self,
-    config: RunnableConfig,
-    checkpoint: Checkpoint,
-    metadata: CheckpointMetadata,
-    new_versions: ChannelVersions,
-) -> RunnableConfig:
-    """
-    Save a checkpoint to Cassandra.
-
-    Args:
-        config: Configuration for the checkpoint
-        checkpoint: The checkpoint to save
-        metadata: Metadata for the checkpoint
-        new_versions: New channel versions as of this write
-
-    Returns:
-        Updated configuration after storing the checkpoint
-    """
-    # Implementation...
-```
-
-## Documentation
-
-### Updating Documentation
-
-Documentation is in multiple places:
-
-- `README.md` - User-facing documentation
-- `DEVELOPMENT.md` (this file) - Developer documentation
-- `docs/*.md` - Detailed design docs
-- Docstrings - Inline API documentation
-
-When adding features:
-1. Update relevant `.md` files
-2. Add/update docstrings
-3. Add examples if appropriate
-
-### Building Documentation Locally
-
-(TODO: Add docs building once we have sphinx/mkdocs setup)
-
-## Release Process
-
-(TODO: Document release process)
-
-1. Update version in `pyproject.toml`
-2. Update `CHANGELOG.md`
-3. Create release tag
-4. Build package: `python -m build`
-5. Upload to PyPI: `python -m twine upload dist/*`
-
-## Getting Help
-
-- **Issues**: [GitHub Issues](https://github.com/yourusername/langgraph-checkpoint-cassandra/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/yourusername/langgraph-checkpoint-cassandra/discussions)
-- **LangGraph Docs**: [LangGraph Documentation](https://langchain-ai.github.io/langgraph/)
-- **Cassandra Docs**: [Apache Cassandra Documentation](https://cassandra.apache.org/doc/)
-
-## Contributing Guidelines
-
-### Pull Request Process
-
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes with tests
-4. Ensure all tests pass
-5. Update documentation
-6. Submit a PR with clear description
-
-### PR Checklist
-
-- [ ] Tests added/updated
-- [ ] Documentation updated
-- [ ] Code formatted (black, isort)
-- [ ] Type hints added
-- [ ] Docstrings added/updated
-- [ ] Examples work correctly
-- [ ] No breaking changes (or clearly documented)
-
-### Review Process
-
-1. Automated tests run on PR
-2. Code review by maintainers
-3. Address feedback
-4. Approval and merge
 
 ## License
 
