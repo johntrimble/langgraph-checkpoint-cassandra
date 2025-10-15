@@ -9,7 +9,7 @@ import asyncio
 import copy
 from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, override
+from typing import Any, overload
 
 import pytest
 import uuid6
@@ -236,11 +236,11 @@ def _normalize_pending_writes(pending_writes):
     return sorted(pending_writes, key=lambda w: (w[0], w[1]))
 
 
-@override
+@overload
 def normalize_checkpoint_tuple(checkpoint_tuple: CheckpointTuple) -> CheckpointTuple:
     ...
 
-@override
+@overload
 def normalize_checkpoint_tuple(checkpoint_tuple: Iterable[CheckpointTuple]) -> Iterable[CheckpointTuple]:
     ...
 
