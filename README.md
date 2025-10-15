@@ -5,7 +5,11 @@ Implementation of LangGraph CheckpointSaver that uses Apache Cassandra.
 ## Installation
 
 ```bash
+# For sync operations only
 pip install langgraph-checkpoint-cassandra
+
+# For async operations (includes cassandra-asyncio-driver)
+pip install langgraph-checkpoint-cassandra[async]
 ```
 
 ## Usage
@@ -13,7 +17,7 @@ pip install langgraph-checkpoint-cassandra
 ### Important Note
 When using the Cassandra checkpointer for the first time, call `.setup()` to create the required tables.
 
-### Sync Example
+### Sync Example (CassandraSaver)
 
 ```python
 from cassandra.cluster import Cluster
@@ -52,25 +56,64 @@ result = app.invoke({"messages": [HumanMessage(content="Hello!")]}, config=confi
 cluster.shutdown()
 ```
 
-### Async Example
+### Async Example (AsyncCassandraSaver)
+
+For high-concurrency scenarios (100s-1000s of concurrent operations), use `AsyncCassandraSaver` with true async I/O:
 
 ```python
-from cassandra.cluster import Cluster
-from langgraph_checkpoint_cassandra import CassandraSaver
+from cassandra_asyncio.cluster import Cluster
+from langgraph_checkpoint_cassandra import AsyncCassandraSaver
+from langgraph.graph import StateGraph, MessagesState, START, END
+from langchain_core.messages import HumanMessage, AIMessage
 
-# Connect to Cassandra
-cluster = Cluster(['localhost'])
-session = cluster.connect()
+async def main():
+    # Connect to Cassandra (note: using cassandra_asyncio)
+    cluster = Cluster(['localhost'])
+    session = cluster.connect()
 
-# Create checkpointer
-checkpointer = CassandraSaver(session, keyspace='my_checkpoints')
-checkpointer.setup()
+    # Create async checkpointer and setup schema
+    checkpointer = AsyncCassandraSaver(session, keyspace='my_checkpoints')
+    await checkpointer.setup()  # Note: async setup()
 
-# Use with async LangGraph
-config = {"configurable": {"thread_id": "user-456"}}
-result = await app.ainvoke({"messages": ["Hello async!"]}, config=config)
+    # Build your graph
+    def echo_bot(state: MessagesState):
+        user_message = state["messages"][-1]
+        return {"messages": [AIMessage(content=user_message.content)]}
 
-cluster.shutdown()
+    graph = StateGraph(MessagesState)
+    graph.add_node("chat", echo_bot)
+    graph.add_edge(START, "chat")
+    graph.add_edge("chat", END)
+
+    # Compile with async checkpointer
+    app = graph.compile(checkpointer=checkpointer)
+
+    # Use with async LangGraph
+    config = {"configurable": {"thread_id": "user-456"}}
+    result = await app.ainvoke({"messages": [HumanMessage(content="Hello async!")]}, config=config)
+
+    # Cleanup
+    cluster.shutdown()
+
+# Run async code
+import asyncio
+asyncio.run(main())
+```
+
+**When to use AsyncCassandraSaver:**
+- Web servers handling many concurrent requests (FastAPI, aiohttp, etc.)
+- Applications with 100s-1000s of concurrent checkpoint operations
+- Scenarios requiring maximum I/O throughput
+
+**When to use CassandraSaver (sync):**
+- Single-threaded applications
+- Sequential checkpoint operations
+- Simpler code without async/await complexity
+- Most typical LangGraph use cases
+
+**Note:** `AsyncCassandraSaver` requires the `cassandra-asyncio-driver` package. Install with:
+```bash
+pip install langgraph-checkpoint-cassandra[async]
 ```
 
 ## Schema
@@ -182,9 +225,12 @@ mixed = list(checkpointer.list(
 - `int` - Integer values
 - `float` - Floating point values
 - `bool` - Boolean values
-- `dict` - Dictionary/map values (supports key-value and value-only filtering)
-- `list` - List values (supports CONTAINS operator)
-- `set` - Set values (supports CONTAINS operator)
+- `dict` or `dict[str, T]` - Dictionary/map values (supports key-value and value-only filtering)
+  - Examples: `dict`, `dict[str, int]`, `dict[str, str]`
+- `list` or `list[T]` - List values (supports CONTAINS operator)
+  - Examples: `list`, `list[int]`, `list[str]`, `list[float]`
+- `set` or `set[T]` - Set values (supports CONTAINS operator)
+  - Examples: `set`, `set[str]`, `set[int]`
 
 **Performance optimization with `indexed_metadata`:**
 - By default, all `queryable_metadata` fields get SAI indexes for maximum performance

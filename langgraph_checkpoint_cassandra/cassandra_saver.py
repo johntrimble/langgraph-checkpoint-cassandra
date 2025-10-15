@@ -28,61 +28,14 @@ from langgraph.checkpoint.base import (
     get_checkpoint_id,
 )
 
+from .cassandra_base import _python_type_to_cql_type
+
 logger = logging.getLogger(__name__)
 
 # Constants
 DEFAULT_KEYSPACE = "langgraph_checkpoints"
 DEFAULT_CONTACT_POINTS = ["localhost"]
 DEFAULT_PORT = 9042
-
-
-def _python_type_to_cql_type(python_type: type) -> str:
-    """
-    Convert Python type to Cassandra CQL type string.
-
-    Args:
-        python_type: Python type (str, int, float, bool, dict, list, set)
-
-    Returns:
-        CQL type string
-
-    Raises:
-        ValueError: If type is not supported
-    """
-    type_mapping = {
-        str: "TEXT",
-        int: "BIGINT",
-        float: "DOUBLE",
-        bool: "BOOLEAN",
-    }
-
-    # Check simple types first
-    if python_type in type_mapping:
-        return type_mapping[python_type]
-
-    # Handle collection types - use non-frozen to enable CONTAINS operator
-    if hasattr(python_type, "__origin__"):
-        origin = python_type.__origin__
-        if origin is dict:
-            # For dict types, use map with text keys and values
-            return "MAP<TEXT, TEXT>"
-        elif origin is list:
-            return "LIST<TEXT>"
-        elif origin is set:
-            return "SET<TEXT>"
-
-    # Fallback for dict, list, set without type parameters
-    if python_type is dict:
-        return "MAP<TEXT, TEXT>"
-    elif python_type is list:
-        return "LIST<TEXT>"
-    elif python_type is set:
-        return "SET<TEXT>"
-
-    raise ValueError(
-        f"Unsupported type: {python_type}. "
-        f"Supported types are: str, int, float, bool, dict, list, set"
-    )
 
 
 class CassandraSaver(BaseCheckpointSaver):
@@ -522,7 +475,8 @@ class CassandraSaver(BaseCheckpointSaver):
 
         # Deserialize checkpoint and metadata
         checkpoint = self.serde.loads_typed((row.type, row.checkpoint))
-        metadata = self.serde.loads(row.metadata)
+        # Metadata is always stored as msgpack
+        metadata = self.serde.loads_typed(("msgpack", row.metadata))
 
         # Get checkpoint_id for pending writes
         checkpoint_id_str = str(row.checkpoint_id) if row.checkpoint_id else None
@@ -560,7 +514,7 @@ class CassandraSaver(BaseCheckpointSaver):
             checkpoint=checkpoint,
             metadata=metadata,
             parent_config=parent_config,
-            pending_writes=pending_writes if pending_writes else None,
+            pending_writes=pending_writes,
         )
 
     def list(
@@ -678,7 +632,8 @@ class CassandraSaver(BaseCheckpointSaver):
         for row in result:
             # Deserialize
             checkpoint = self.serde.loads_typed((row.type, row.checkpoint))
-            metadata = self.serde.loads(row.metadata)
+            # Metadata is always stored as msgpack
+            metadata = self.serde.loads_typed(("msgpack", row.metadata))
 
             # Apply client-side metadata filters (for non-queryable fields)
             if client_side_filters:
@@ -755,7 +710,7 @@ class CassandraSaver(BaseCheckpointSaver):
                 checkpoint=checkpoint,
                 metadata=metadata,
                 parent_config=parent_config,
-                pending_writes=pending_writes if pending_writes else None,
+                pending_writes=pending_writes,
             )
 
     def put(
@@ -790,7 +745,8 @@ class CassandraSaver(BaseCheckpointSaver):
 
         # Serialize checkpoint and metadata
         type_str, checkpoint_blob = self.serde.dumps_typed(checkpoint)
-        metadata_blob = self.serde.dumps(metadata)
+        # Metadata is always stored as msgpack
+        _, metadata_blob = self.serde.dumps_typed(metadata)
 
         # Insert checkpoint
         logging.info(f"Checkpoint ID type: {self.checkpoint_id_type}, value: {checkpoint_id_param}, typeof: {type(checkpoint_id_param)}")
@@ -937,10 +893,13 @@ class CassandraSaver(BaseCheckpointSaver):
         logger.info(f"Successfully deleted thread {thread_id_str}")
 
     # Async methods
+    # Async methods not supported - use AsyncCassandraSaver instead
     async def aget_tuple(self, config: RunnableConfig) -> CheckpointTuple | None:
-        """Async version of get_tuple."""
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(None, self.get_tuple, config)
+        """Async method not supported. Use AsyncCassandraSaver for async operations."""
+        raise NotImplementedError(
+            "Async methods not available on CassandraSaver. "
+            "Use AsyncCassandraSaver for async operations."
+        )
 
     async def alist(
         self,
@@ -950,21 +909,13 @@ class CassandraSaver(BaseCheckpointSaver):
         before: RunnableConfig | None = None,
         limit: int | None = None,
     ) -> AsyncIterator[CheckpointTuple]:
-        """Async version of list."""
-        loop = asyncio.get_running_loop()
-        # Get the iterator in executor
-        iterator = await loop.run_in_executor(
-            None, lambda: self.list(config, filter=filter, before=before, limit=limit)
+        """Async method not supported. Use AsyncCassandraSaver for async operations."""
+        raise NotImplementedError(
+            "Async methods not available on CassandraSaver. "
+            "Use AsyncCassandraSaver for async operations."
         )
-        # Yield items from iterator
-        while True:
-            try:
-                item = await loop.run_in_executor(None, next, iterator, None)
-                if item is None:
-                    break
-                yield item
-            except StopIteration:
-                break
+        # Make this an async generator to satisfy type checker
+        yield  # pragma: no cover
 
     async def aput(
         self,
@@ -973,10 +924,10 @@ class CassandraSaver(BaseCheckpointSaver):
         metadata: CheckpointMetadata,
         new_versions: ChannelVersions,
     ) -> RunnableConfig:
-        """Async version of put."""
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
-            None, self.put, config, checkpoint, metadata, new_versions
+        """Async method not supported. Use AsyncCassandraSaver for async operations."""
+        raise NotImplementedError(
+            "Async methods not available on CassandraSaver. "
+            "Use AsyncCassandraSaver for async operations."
         )
 
     async def aput_writes(
@@ -986,8 +937,8 @@ class CassandraSaver(BaseCheckpointSaver):
         task_id: str,
         task_path: str = "",
     ) -> None:
-        """Async version of put_writes."""
-        loop = asyncio.get_running_loop()
-        await loop.run_in_executor(
-            None, self.put_writes, config, writes, task_id, task_path
+        """Async method not supported. Use AsyncCassandraSaver for async operations."""
+        raise NotImplementedError(
+            "Async methods not available on CassandraSaver. "
+            "Use AsyncCassandraSaver for async operations."
         )

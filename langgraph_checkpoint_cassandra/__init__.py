@@ -15,3 +15,11 @@ __all__ = [
     "MigrationManager",
     "Migration",
 ]
+
+# Try to import AsyncCassandraSaver if cassandra-asyncio-driver is installed
+try:
+    from langgraph_checkpoint_cassandra.cassandra_saver_async import AsyncCassandraSaver
+    __all__.append("AsyncCassandraSaver")
+except ImportError:
+    # cassandra-asyncio-driver not installed
+    pass
