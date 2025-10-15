@@ -6,15 +6,16 @@ produce identical results for the same sequences of operations.
 """
 
 import asyncio
+import copy
 import uuid6
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Iterable, override
 
 import pytest
 from hypothesis import given, settings, strategies as st, HealthCheck
 from cassandra.cluster import Cluster
 from cassandra_asyncio.cluster import Cluster as AsyncCluster
-from langgraph.checkpoint.base import Checkpoint, CheckpointMetadata, WRITES_IDX_MAP
+from langgraph.checkpoint.base import Checkpoint, CheckpointMetadata, CheckpointTuple, WRITES_IDX_MAP
 from langgraph_checkpoint_cassandra import CassandraSaver, AsyncCassandraSaver
 from langgraph.checkpoint.memory import InMemorySaver
 
@@ -200,13 +201,55 @@ def savers(clusters):
     async_saver = AsyncCassandraSaver(async_session, keyspace=async_keyspace)
     asyncio.run(async_saver.setup(replication_factor=1))
 
-    yield sync_saver, async_saver, InMemorySaver()
+    yield sync_saver, async_saver
 
     # Cleanup after test
     cleanup_keyspaces(sync_session, [sync_keyspace, async_keyspace])
     sync_session.shutdown()
     async_session.shutdown()
 
+
+def _normalize_pending_writes(pending_writes):
+    """Sort pending writes by (task_id, channel, value_str) for consistent comparison.
+
+    Different implementations may return pending_writes in different orders:
+    - InMemorySaver: Returns in insertion order (dict iteration order)
+    - CassandraSaver: Returns sorted by (task_id, idx) due to clustering order
+    - PostgresSaver: Returns sorted by (task_id, idx) with ORDER BY clause
+
+    Where does the order matter? Order matters for a given (task_id, channel) pair,
+    as it defines the sequence of writes to apply to that channel. Aside from that,
+    the order of different (task_id, channel) pairs does not matter. Consequently,
+    we sort by (task_id, channel) to enable comparison across implementations.
+    """
+    if not pending_writes:
+        return []
+
+    return sorted(pending_writes, key=lambda w: (w[0], w[1]))
+
+
+@override
+def normalize_checkpoint_tuple(checkpoint_tuple: CheckpointTuple) -> CheckpointTuple:
+    ...
+
+@override
+def normalize_checkpoint_tuple(checkpoint_tuple: Iterable[CheckpointTuple]) -> Iterable[CheckpointTuple]:
+    ...
+
+def normalize_checkpoint_tuple(checkpoint_tuple: Iterable[CheckpointTuple] | CheckpointTuple) -> Iterable[CheckpointTuple] | CheckpointTuple:
+    if checkpoint_tuple is None:
+        return checkpoint_tuple
+
+    if not isinstance(checkpoint_tuple, CheckpointTuple):
+        return [normalize_checkpoint_tuple(t) for t in checkpoint_tuple]
+
+    if checkpoint_tuple.pending_writes:
+        checkpoint_tuple = copy.deepcopy(checkpoint_tuple)
+        checkpoint_tuple._replace(
+            pending_writes=_normalize_pending_writes(checkpoint_tuple.pending_writes)
+        )
+
+    return checkpoint_tuple
 
 class TestSyncAsyncEquivalence:
     """Test that sync and async implementations produce identical results for operation sequences."""
@@ -266,7 +309,17 @@ class TestSyncAsyncEquivalence:
     )
     def test_operation_sequences_produce_identical_results(self, savers, operations):
         """Property: Executing the same sequence of operations should produce identical results."""
-        sync_saver, async_saver, in_memory_saver = savers
+        sync_saver, async_saver = savers
+
+        # Clear all data from Cassandra tables for each Hypothesis example to ensure clean state
+        # Use synchronous execute for both since cassandra-asyncio session also supports it
+        sync_saver.session.execute(f"TRUNCATE {sync_saver.keyspace}.checkpoints")
+        sync_saver.session.execute(f"TRUNCATE {sync_saver.keyspace}.checkpoint_writes")
+        async_saver.session.execute(f"TRUNCATE {async_saver.keyspace}.checkpoints")
+        async_saver.session.execute(f"TRUNCATE {async_saver.keyspace}.checkpoint_writes")
+
+        # Create a fresh InMemorySaver for each Hypothesis example to avoid state persistence
+        in_memory_saver = InMemorySaver()
 
         # Track checkpoints we've created so we can reference them later
         # Key: (thread_id, checkpoint_ns) -> list of checkpoint_ids
@@ -279,7 +332,8 @@ class TestSyncAsyncEquivalence:
         for op in operations:
             if isinstance(op, PutOperation):
                 # Enforce version immutability: ensure same version always has same value
-                checkpoint = op.checkpoint.copy()
+                # Use deepcopy to avoid modifying the original checkpoint dict
+                checkpoint = copy.deepcopy(op.checkpoint)
                 key_prefix = (op.thread_id, op.checkpoint_ns)
 
                 for channel, version in checkpoint["channel_versions"].items():
@@ -360,9 +414,9 @@ class TestSyncAsyncEquivalence:
                 if checkpoint_id:
                     config["configurable"]["checkpoint_id"] = checkpoint_id
 
-                result_sync = sync_saver.get_tuple(config)
-                result_async = asyncio.run(async_saver.aget_tuple(config))
-                result_memory = in_memory_saver.get_tuple(config)
+                result_sync = normalize_checkpoint_tuple(sync_saver.get_tuple(config))
+                result_async = normalize_checkpoint_tuple(asyncio.run(async_saver.aget_tuple(config)))
+                result_memory = normalize_checkpoint_tuple(in_memory_saver.get_tuple(config))
 
                 # All three should return the same result
                 assert result_sync == result_async
@@ -381,15 +435,15 @@ class TestSyncAsyncEquivalence:
                 if op.limit is not None:
                     kwargs["limit"] = op.limit
 
-                list_sync = list(sync_saver.list(config, **kwargs))
-                list_async = asyncio.run(self._async_list_to_list(async_saver.alist(config, **kwargs)))
-                list_memory = list(in_memory_saver.list(config, **kwargs))
+                list_sync = normalize_checkpoint_tuple(sync_saver.list(config, **kwargs))
+                list_async = normalize_checkpoint_tuple(asyncio.run(self._async_list_to_list(async_saver.alist(config, **kwargs))))
+                list_memory = normalize_checkpoint_tuple(in_memory_saver.list(config, **kwargs))
 
                 # Should have same number of results
                 assert len(list_sync) == len(list_async)
                 assert len(list_sync) == len(list_memory)
 
-                # Compare checkpoints
+                # Compare checkpoints (normalize pending_writes first)
                 for sync_tuple, async_tuple, memory_tuple in zip(list_sync, list_async, list_memory):
                     assert sync_tuple == async_tuple
                     assert sync_tuple == memory_tuple

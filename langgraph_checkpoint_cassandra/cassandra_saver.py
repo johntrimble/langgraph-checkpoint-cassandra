@@ -26,6 +26,7 @@ from langgraph.checkpoint.base import (
     CheckpointMetadata,
     CheckpointTuple,
     get_checkpoint_id,
+    WRITES_IDX_MAP,
 )
 
 from .cassandra_base import _python_type_to_cql_type
@@ -487,6 +488,8 @@ class CassandraSaver(BaseCheckpointSaver):
             self.stmt_get_writes, (thread_id, checkpoint_ns, checkpoint_id)
         )
 
+        # Writes are stored with sequential idx to preserve insertion order
+        # Cassandra will return them ordered by clustering key (task_id, idx)
         pending_writes = []
         for write_row in writes_result:
             value = self.serde.loads_typed((write_row.type, write_row.value))
@@ -830,9 +833,13 @@ class CassandraSaver(BaseCheckpointSaver):
         checkpoint_id_str = config["configurable"]["checkpoint_id"]
         checkpoint_id_param = self._convert_checkpoint_id(checkpoint_id_str)
 
-        # Insert writes individually for now
+        # Simple insert for each write - no deduplication check
+        # Use WRITES_IDX_MAP for special channels, enumerate index for regular channels
+        # Last write wins (Cassandra will overwrite existing rows with same PRIMARY KEY)
         for idx, (channel, value) in enumerate(writes):
+            write_idx = WRITES_IDX_MAP.get(channel, idx)  # Use WRITES_IDX_MAP
             type_str, value_blob = self.serde.dumps_typed(value)
+
             self.session.execute(
                 self.stmt_insert_write,
                 (
@@ -841,7 +848,7 @@ class CassandraSaver(BaseCheckpointSaver):
                     checkpoint_id_param,
                     task_id,
                     task_path,
-                    idx,
+                    write_idx,  # Use WRITES_IDX_MAP value
                     channel,
                     type_str,
                     value_blob,

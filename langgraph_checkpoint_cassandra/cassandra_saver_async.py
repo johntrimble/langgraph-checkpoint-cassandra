@@ -18,6 +18,7 @@ from langgraph.checkpoint.base import (
     CheckpointMetadata,
     CheckpointTuple,
     get_checkpoint_id,
+    WRITES_IDX_MAP,
 )
 
 from .cassandra_base import BaseCassandraSaver, DEFAULT_KEYSPACE, _python_type_to_cql_type
@@ -693,8 +694,11 @@ class AsyncCassandraSaver(BaseCassandraSaver):
         checkpoint_ns = config["configurable"].get("checkpoint_ns", "")
         checkpoint_id = self._convert_checkpoint_id(config["configurable"]["checkpoint_id"])
 
-        # Insert each write
+        # Simple insert for each write - no deduplication check
+        # Use WRITES_IDX_MAP for special channels, enumerate index for regular channels
+        # Last write wins (Cassandra will overwrite existing rows with same PRIMARY KEY)
         for idx, (channel, value) in enumerate(writes):
+            write_idx = WRITES_IDX_MAP.get(channel, idx)  # Use WRITES_IDX_MAP
             type_str, value_blob = self.serde.dumps_typed(value)
 
             await self.session.aexecute(
@@ -705,7 +709,7 @@ class AsyncCassandraSaver(BaseCassandraSaver):
                     checkpoint_id,
                     task_id,
                     task_path,
-                    idx,
+                    write_idx,  # Use WRITES_IDX_MAP value
                     channel,
                     type_str,
                     value_blob,
