@@ -309,7 +309,9 @@ class CassandraSaver(BaseCheckpointSaver):
 
         # Add queryable metadata columns and indexes if specified
         if self.queryable_metadata:
-            logger.info(f"Setting up queryable metadata fields: {list(self.queryable_metadata.keys())}")
+            logger.info(
+                f"Setting up queryable metadata fields: {list(self.queryable_metadata.keys())}"
+            )
             self._setup_queryable_metadata()
 
         # Prepare statements now that tables exist
@@ -343,7 +345,10 @@ class CassandraSaver(BaseCheckpointSaver):
                     logger.info(f"  ✓ Added column: {column_name} ({cql_type})")
                 except Exception as e:
                     # Column likely already exists, which is fine
-                    if "conflicts with an existing column" in str(e) or "already exists" in str(e).lower():
+                    if (
+                        "conflicts with an existing column" in str(e)
+                        or "already exists" in str(e).lower()
+                    ):
                         logger.debug(f"  → Column {column_name} already exists")
                     else:
                         logger.warning(f"  ⚠ Could not add column {column_name}: {e}")
@@ -362,7 +367,9 @@ class CassandraSaver(BaseCheckpointSaver):
                     except Exception as e:
                         logger.debug(f"  → Index {index_name} setup: {e}")
                 else:
-                    logger.info(f"  → Column {column_name} created without index (will use ALLOW FILTERING)")
+                    logger.info(
+                        f"  → Column {column_name} created without index (will use ALLOW FILTERING)"
+                    )
 
             except ValueError as e:
                 logger.error(f"  ✗ Invalid type for field '{field_name}': {e}")
@@ -561,7 +568,9 @@ class CassandraSaver(BaseCheckpointSaver):
         # Query checkpoints with server-side filtering if applicable
         if server_side_filters:
             # Build dynamic query with metadata filters
-            query_parts = [f"SELECT * FROM {self.keyspace}.checkpoints WHERE thread_id = ? AND checkpoint_ns = ?"]
+            query_parts = [
+                f"SELECT * FROM {self.keyspace}.checkpoints WHERE thread_id = ? AND checkpoint_ns = ?"
+            ]
             query_params = [thread_id, checkpoint_ns]
             needs_allow_filtering = False
 
@@ -575,10 +584,15 @@ class CassandraSaver(BaseCheckpointSaver):
                     needs_allow_filtering = True
 
                 # For collection types (list, set, map), use CONTAINS
-                if field_type in (list, set) or (hasattr(field_type, "__origin__") and field_type.__origin__ in (list, set)):
+                if field_type in (list, set) or (
+                    hasattr(field_type, "__origin__")
+                    and field_type.__origin__ in (list, set)
+                ):
                     query_parts.append(f"AND {column_name} CONTAINS ?")
                     query_params.append(field_value)
-                elif field_type is dict or (hasattr(field_type, "__origin__") and field_type.__origin__ is dict):
+                elif field_type is dict or (
+                    hasattr(field_type, "__origin__") and field_type.__origin__ is dict
+                ):
                     # For maps, check if filtering by key or value
                     # If field_value is a dict, check if keys exist
                     if isinstance(field_value, dict):
@@ -639,7 +653,9 @@ class CassandraSaver(BaseCheckpointSaver):
 
             # Apply client-side metadata filters (for non-queryable fields)
             if client_side_filters:
-                if not all(metadata.get(k) == v for k, v in client_side_filters.items()):
+                if not all(
+                    metadata.get(k) == v for k, v in client_side_filters.items()
+                ):
                     continue
 
             checkpoints_to_return.append((row, checkpoint, metadata))
@@ -658,7 +674,7 @@ class CassandraSaver(BaseCheckpointSaver):
         all_writes = []
 
         for i in range(0, len(checkpoint_ids), BATCH_SIZE):
-            batch_ids = checkpoint_ids[i:i+BATCH_SIZE]
+            batch_ids = checkpoint_ids[i : i + BATCH_SIZE]
 
             # Prepare query with IN clause for this batch
             batch_query = self.session.prepare(f"""
@@ -668,8 +684,7 @@ class CassandraSaver(BaseCheckpointSaver):
             """)
 
             batch_result = self.session.execute(
-                batch_query,
-                (thread_id, checkpoint_ns, batch_ids)
+                batch_query, (thread_id, checkpoint_ns, batch_ids)
             )
             all_writes.extend(batch_result)
 
@@ -743,7 +758,9 @@ class CassandraSaver(BaseCheckpointSaver):
         # Convert checkpoint/thread IDs as appropriate
         thread_id_param = self._convert_thread_id(thread_id_str)
         checkpoint_id_param = self._convert_checkpoint_id(checkpoint_id_str)
-        parent_checkpoint_id_param = self._convert_checkpoint_id(parent_checkpoint_id_str)
+        parent_checkpoint_id_param = self._convert_checkpoint_id(
+            parent_checkpoint_id_str
+        )
 
         # Serialize checkpoint and metadata
         type_str, checkpoint_blob = self.serde.dumps_typed(checkpoint)
@@ -751,14 +768,34 @@ class CassandraSaver(BaseCheckpointSaver):
         _, metadata_blob = self.serde.dumps_typed(metadata)
 
         # Insert checkpoint
-        logging.info(f"Checkpoint ID type: {self.checkpoint_id_type}, value: {checkpoint_id_param}, typeof: {type(checkpoint_id_param)}")
-        logging.info(f"Parent Checkpoint ID type: {self.checkpoint_id_type}, value: {parent_checkpoint_id_param}, typeof: {type(parent_checkpoint_id_param)}")
+        logging.info(
+            f"Checkpoint ID type: {self.checkpoint_id_type}, value: {checkpoint_id_param}, typeof: {type(checkpoint_id_param)}"
+        )
+        logging.info(
+            f"Parent Checkpoint ID type: {self.checkpoint_id_type}, value: {parent_checkpoint_id_param}, typeof: {type(parent_checkpoint_id_param)}"
+        )
 
         # If queryable metadata is specified, we need to use dynamic query
         if self.queryable_metadata:
             # Build column list and values
-            columns = ["thread_id", "checkpoint_ns", "checkpoint_id", "parent_checkpoint_id", "type", "checkpoint", "metadata"]
-            params = [thread_id_param, checkpoint_ns, checkpoint_id_param, parent_checkpoint_id_param, type_str, checkpoint_blob, metadata_blob]
+            columns = [
+                "thread_id",
+                "checkpoint_ns",
+                "checkpoint_id",
+                "parent_checkpoint_id",
+                "type",
+                "checkpoint",
+                "metadata",
+            ]
+            params = [
+                thread_id_param,
+                checkpoint_ns,
+                checkpoint_id_param,
+                parent_checkpoint_id_param,
+                type_str,
+                checkpoint_blob,
+                metadata_blob,
+            ]
 
             # Add queryable metadata columns and values
             for field_name in self.queryable_metadata:
@@ -798,7 +835,7 @@ class CassandraSaver(BaseCheckpointSaver):
                     type_str,
                     checkpoint_blob,
                     metadata_blob,
-                )
+                ),
             )
 
         return {
@@ -851,7 +888,7 @@ class CassandraSaver(BaseCheckpointSaver):
                     channel,
                     type_str,
                     value_blob,
-                )
+                ),
             )
 
     def delete_thread(self, thread_id_str: str) -> None:
@@ -949,7 +986,9 @@ class CassandraSaver(BaseCheckpointSaver):
         Creates dedicated columns for each queryable metadata field and
         optionally creates SAI indexes for efficient server-side filtering.
         """
-        logger.info(f"Setting up queryable metadata columns for {len(self.queryable_metadata)} fields")
+        logger.info(
+            f"Setting up queryable metadata columns for {len(self.queryable_metadata)} fields"
+        )
 
         for field_name, field_type in self.queryable_metadata.items():
             column_name = f"metadata__{field_name}"
@@ -965,7 +1004,9 @@ class CassandraSaver(BaseCheckpointSaver):
                 await self.session.aexecute(alter_stmt)
                 logger.info(f"  ✓ Added column {column_name} ({cql_type})")
             except Exception as e:
-                if "conflicts with an existing column" in str(e) or "already exists" in str(e):
+                if "conflicts with an existing column" in str(
+                    e
+                ) or "already exists" in str(e):
                     logger.debug(f"  → Column {column_name} already exists")
                 else:
                     logger.warning(f"  ✗ Failed to add column {column_name}: {e}")
@@ -988,7 +1029,9 @@ class CassandraSaver(BaseCheckpointSaver):
                     else:
                         logger.warning(f"  ✗ Failed to create index {index_name}: {e}")
             else:
-                logger.info(f"  → Column {column_name} created without index (will use ALLOW FILTERING)")
+                logger.info(
+                    f"  → Column {column_name} created without index (will use ALLOW FILTERING)"
+                )
 
     # Async methods - require cassandra-asyncio driver
     def _ensure_async_support(self) -> None:
@@ -997,7 +1040,7 @@ class CassandraSaver(BaseCheckpointSaver):
         Raises:
             NotImplementedError: If session doesn't have aexecute method (async support).
         """
-        if not hasattr(self.session, 'aexecute'):
+        if not hasattr(self.session, "aexecute"):
             raise NotImplementedError(
                 "Async operations require cassandra-asyncio driver.\n"
                 "Install with: pip install cassandra-driver[asyncio]\n"
@@ -1034,12 +1077,11 @@ class CassandraSaver(BaseCheckpointSaver):
             checkpoint_id = self._convert_checkpoint_id(checkpoint_id_str)
             result = await self.session.aexecute(
                 self.stmt_get_checkpoint_by_id,
-                (thread_id, checkpoint_ns, checkpoint_id)
+                (thread_id, checkpoint_ns, checkpoint_id),
             )
         else:
             result = await self.session.aexecute(
-                self.stmt_get_latest_checkpoint,
-                (thread_id, checkpoint_ns)
+                self.stmt_get_latest_checkpoint, (thread_id, checkpoint_ns)
             )
 
         if not result:
@@ -1054,8 +1096,7 @@ class CassandraSaver(BaseCheckpointSaver):
 
         # Query pending writes
         writes_result = await self.session.aexecute(
-            self.stmt_get_writes,
-            (thread_id, checkpoint_ns, row.checkpoint_id)
+            self.stmt_get_writes, (thread_id, checkpoint_ns, row.checkpoint_id)
         )
 
         pending_writes = []
@@ -1135,7 +1176,9 @@ class CassandraSaver(BaseCheckpointSaver):
         # Query checkpoints with server-side filtering if applicable
         if server_side_filters:
             # Build dynamic query with metadata filters
-            query_parts = [f"SELECT * FROM {self.keyspace}.checkpoints WHERE thread_id = ? AND checkpoint_ns = ?"]
+            query_parts = [
+                f"SELECT * FROM {self.keyspace}.checkpoints WHERE thread_id = ? AND checkpoint_ns = ?"
+            ]
             query_params = [thread_id, checkpoint_ns]
             needs_allow_filtering = False
 
@@ -1149,10 +1192,15 @@ class CassandraSaver(BaseCheckpointSaver):
                     needs_allow_filtering = True
 
                 # For collection types (list, set, map), use CONTAINS
-                if field_type in (list, set) or (hasattr(field_type, "__origin__") and field_type.__origin__ in (list, set)):
+                if field_type in (list, set) or (
+                    hasattr(field_type, "__origin__")
+                    and field_type.__origin__ in (list, set)
+                ):
                     query_parts.append(f"AND {column_name} CONTAINS ?")
                     query_params.append(field_value)
-                elif field_type is dict or (hasattr(field_type, "__origin__") and field_type.__origin__ is dict):
+                elif field_type is dict or (
+                    hasattr(field_type, "__origin__") and field_type.__origin__ is dict
+                ):
                     # For maps, check if filtering by key or value
                     if isinstance(field_value, dict):
                         # PostgreSQL @> behavior: check if all key-value pairs exist
@@ -1212,7 +1260,9 @@ class CassandraSaver(BaseCheckpointSaver):
 
             # Apply client-side metadata filters (for non-queryable fields)
             if client_side_filters:
-                if not all(metadata.get(k) == v for k, v in client_side_filters.items()):
+                if not all(
+                    metadata.get(k) == v for k, v in client_side_filters.items()
+                ):
                     continue
 
             checkpoints_to_return.append((row, checkpoint, metadata))
@@ -1231,7 +1281,7 @@ class CassandraSaver(BaseCheckpointSaver):
         all_writes = []
 
         for i in range(0, len(checkpoint_ids), BATCH_SIZE):
-            batch_ids = checkpoint_ids[i:i+BATCH_SIZE]
+            batch_ids = checkpoint_ids[i : i + BATCH_SIZE]
 
             # Prepare query with IN clause for this batch
             batch_query = self.session.prepare(f"""
@@ -1241,8 +1291,7 @@ class CassandraSaver(BaseCheckpointSaver):
             """)
 
             batch_result = await self.session.aexecute(
-                batch_query,
-                (thread_id, checkpoint_ns, batch_ids)
+                batch_query, (thread_id, checkpoint_ns, batch_ids)
             )
             all_writes.extend(batch_result)
 
@@ -1343,8 +1392,13 @@ class CassandraSaver(BaseCheckpointSaver):
         if self.queryable_metadata:
             # Build dynamic INSERT with queryable metadata columns
             columns = [
-                "thread_id", "checkpoint_ns", "checkpoint_id",
-                "parent_checkpoint_id", "type", "checkpoint", "metadata"
+                "thread_id",
+                "checkpoint_ns",
+                "checkpoint_id",
+                "parent_checkpoint_id",
+                "type",
+                "checkpoint",
+                "metadata",
             ]
             placeholders = ["?" for _ in range(7)]
             params = base_params.copy()
@@ -1416,7 +1470,9 @@ class CassandraSaver(BaseCheckpointSaver):
         thread_id_str = config["configurable"]["thread_id"]
         thread_id = self._convert_thread_id(thread_id_str)
         checkpoint_ns = config["configurable"].get("checkpoint_ns", "")
-        checkpoint_id = self._convert_checkpoint_id(config["configurable"]["checkpoint_id"])
+        checkpoint_id = self._convert_checkpoint_id(
+            config["configurable"]["checkpoint_id"]
+        )
 
         # Simple insert for each write - no deduplication check
         # Use WRITES_IDX_MAP for special channels, enumerate index for regular channels
@@ -1437,7 +1493,7 @@ class CassandraSaver(BaseCheckpointSaver):
                     channel,
                     type_str,
                     value_blob,
-                )
+                ),
             )
 
     async def adelete_thread(self, thread_id_str: str) -> None:

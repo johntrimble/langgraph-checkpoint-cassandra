@@ -156,7 +156,11 @@ def test_dict_str_int_metadata(cluster, sample_checkpoint):
         # Retrieve and verify
         result_tuple = saver.get_tuple(config)
         assert result_tuple is not None
-        assert result_tuple.metadata["counters"] == {"views": 42, "likes": 15, "shares": 3}
+        assert result_tuple.metadata["counters"] == {
+            "views": 42,
+            "likes": 15,
+            "shares": 3,
+        }
 
     finally:
         session.execute(f"DROP KEYSPACE IF EXISTS {keyspace}")
@@ -194,14 +198,20 @@ def test_dict_str_str_metadata(cluster, sample_checkpoint):
 
         # Test storing and retrieving
         config = {"configurable": {"thread_id": "test-thread", "checkpoint_ns": ""}}
-        metadata = {"labels": {"env": "production", "region": "us-east", "version": "v1.2.3"}}
+        metadata = {
+            "labels": {"env": "production", "region": "us-east", "version": "v1.2.3"}
+        }
 
         saver.put(config, sample_checkpoint, metadata, {})
 
         # Retrieve and verify
         result_tuple = saver.get_tuple(config)
         assert result_tuple is not None
-        assert result_tuple.metadata["labels"] == {"env": "production", "region": "us-east", "version": "v1.2.3"}
+        assert result_tuple.metadata["labels"] == {
+            "env": "production",
+            "region": "us-east",
+            "version": "v1.2.3",
+        }
 
     finally:
         session.execute(f"DROP KEYSPACE IF EXISTS {keyspace}")

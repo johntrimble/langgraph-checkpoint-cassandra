@@ -32,6 +32,7 @@ from langgraph_checkpoint_cassandra import AsyncCassandraSaver, CassandraSaver
 @dataclass
 class PutOperation:
     """Put a checkpoint."""
+
     thread_id: str
     checkpoint_ns: str
     checkpoint: Checkpoint
@@ -41,15 +42,19 @@ class PutOperation:
 @dataclass
 class GetOperation:
     """Get a checkpoint."""
+
     thread_id: str
     checkpoint_ns: str
     checkpoint_id: str | None  # None means get latest
-    checkpoint_index: int | None  # If checkpoint_id is "__will_replace__", use this index
+    checkpoint_index: (
+        int | None
+    )  # If checkpoint_id is "__will_replace__", use this index
 
 
 @dataclass
 class PutWritesOperation:
     """Put writes for a checkpoint."""
+
     thread_id: str
     checkpoint_ns: str
     checkpoint_id: str
@@ -60,6 +65,7 @@ class PutWritesOperation:
 @dataclass
 class ListOperation:
     """List checkpoints."""
+
     thread_id: str
     checkpoint_ns: str
     limit: int | None
@@ -68,6 +74,7 @@ class ListOperation:
 @dataclass
 class DeleteThreadOperation:
     """Delete all data for a thread."""
+
     thread_id: str
 
 
@@ -93,10 +100,14 @@ def channel_names(draw):
 @st.composite
 def channel_value(draw):
     """Generate a single channel value with ASCII-safe strings."""
-    return draw(st.one_of(
-        st.text(alphabet=st.characters(min_codepoint=32, max_codepoint=126), max_size=20),
-        st.integers(min_value=-100, max_value=100),
-    ))
+    return draw(
+        st.one_of(
+            st.text(
+                alphabet=st.characters(min_codepoint=32, max_codepoint=126), max_size=20
+            ),
+            st.integers(min_value=-100, max_value=100),
+        )
+    )
 
 
 @st.composite
@@ -109,7 +120,11 @@ def checkpoints(draw):
     """
     # Pick 1-3 channels for this checkpoint
     num_channels = draw(st.integers(min_value=1, max_value=3))
-    channels = draw(st.lists(channel_names(), min_size=num_channels, max_size=num_channels, unique=True))
+    channels = draw(
+        st.lists(
+            channel_names(), min_size=num_channels, max_size=num_channels, unique=True
+        )
+    )
 
     channel_values = {}
     channel_versions = {}
@@ -129,7 +144,7 @@ def checkpoints(draw):
         ts=draw(st.datetimes().map(lambda d: d.isoformat())),
         channel_values=channel_values,
         channel_versions=channel_versions,
-        versions_seen={}
+        versions_seen={},
     )
 
 
@@ -137,7 +152,13 @@ def checkpoints(draw):
 def metadata_dicts(draw):
     """Generate metadata dictionaries with ASCII-safe characters."""
     return CheckpointMetadata(
-        source=draw(st.text(alphabet=st.characters(min_codepoint=32, max_codepoint=126), min_size=1, max_size=10)),
+        source=draw(
+            st.text(
+                alphabet=st.characters(min_codepoint=32, max_codepoint=126),
+                min_size=1,
+                max_size=10,
+            )
+        ),
         step=draw(st.integers(min_value=0, max_value=100)),
         parents={},
     )
@@ -156,10 +177,15 @@ def write_sequences(draw):
         else:
             channel = draw(st.sampled_from(list(WRITES_IDX_MAP.keys())))
 
-        value = draw(st.one_of(
-            st.text(alphabet=st.characters(min_codepoint=32, max_codepoint=126), max_size=20),
-            st.integers(min_value=-100, max_value=100),
-        ))
+        value = draw(
+            st.one_of(
+                st.text(
+                    alphabet=st.characters(min_codepoint=32, max_codepoint=126),
+                    max_size=20,
+                ),
+                st.integers(min_value=-100, max_value=100),
+            )
+        )
 
         writes.append((channel, value))
 
@@ -184,6 +210,7 @@ def cleanup_keyspaces(session, keyspaces):
             session.execute(f"DROP KEYSPACE IF EXISTS {ks}")
         except Exception:
             pass
+
 
 @pytest.fixture
 def savers(clusters):
@@ -237,14 +264,20 @@ def _normalize_pending_writes(pending_writes):
 
 
 @overload
-def normalize_checkpoint_tuple(checkpoint_tuple: CheckpointTuple) -> CheckpointTuple:
-    ...
+def normalize_checkpoint_tuple(
+    checkpoint_tuple: CheckpointTuple,
+) -> CheckpointTuple: ...
+
 
 @overload
-def normalize_checkpoint_tuple(checkpoint_tuple: Iterable[CheckpointTuple]) -> Iterable[CheckpointTuple]:
-    ...
+def normalize_checkpoint_tuple(
+    checkpoint_tuple: Iterable[CheckpointTuple],
+) -> Iterable[CheckpointTuple]: ...
 
-def normalize_checkpoint_tuple(checkpoint_tuple: Iterable[CheckpointTuple] | CheckpointTuple) -> Iterable[CheckpointTuple] | CheckpointTuple:
+
+def normalize_checkpoint_tuple(
+    checkpoint_tuple: Iterable[CheckpointTuple] | CheckpointTuple,
+) -> Iterable[CheckpointTuple] | CheckpointTuple:
     if checkpoint_tuple is None:
         return checkpoint_tuple
 
@@ -259,13 +292,17 @@ def normalize_checkpoint_tuple(checkpoint_tuple: Iterable[CheckpointTuple] | Che
 
     return checkpoint_tuple
 
+
 class TestSyncAsyncEquivalence:
     """Test that sync and async implementations produce identical results for operation sequences."""
 
     @settings(
         max_examples=10,
         deadline=10000,
-        suppress_health_check=[HealthCheck.function_scoped_fixture, HealthCheck.too_slow]
+        suppress_health_check=[
+            HealthCheck.function_scoped_fixture,
+            HealthCheck.too_slow,
+        ],
     )
     @given(
         operations=st.lists(
@@ -294,9 +331,13 @@ class TestSyncAsyncEquivalence:
                     checkpoint_ns=checkpoint_namespaces(),
                     checkpoint_id=st.one_of(
                         st.none(),  # 50% - get latest
-                        st.just("__will_replace__")  # 50% - will be replaced with checkpoint at index
+                        st.just(
+                            "__will_replace__"
+                        ),  # 50% - will be replaced with checkpoint at index
                     ),
-                    checkpoint_index=st.integers(min_value=0, max_value=100),  # Index to pick from history
+                    checkpoint_index=st.integers(
+                        min_value=0, max_value=100
+                    ),  # Index to pick from history
                 ),
                 # List checkpoints
                 st.builds(
@@ -312,7 +353,7 @@ class TestSyncAsyncEquivalence:
                 ),
             ),
             min_size=5,
-            max_size=1000
+            max_size=1000,
         )
     )
     def test_operation_sequences_produce_identical_results(self, savers, operations):
@@ -324,7 +365,9 @@ class TestSyncAsyncEquivalence:
         sync_saver.session.execute(f"TRUNCATE {sync_saver.keyspace}.checkpoints")
         sync_saver.session.execute(f"TRUNCATE {sync_saver.keyspace}.checkpoint_writes")
         async_saver.session.execute(f"TRUNCATE {async_saver.keyspace}.checkpoints")
-        async_saver.session.execute(f"TRUNCATE {async_saver.keyspace}.checkpoint_writes")
+        async_saver.session.execute(
+            f"TRUNCATE {async_saver.keyspace}.checkpoint_writes"
+        )
 
         # Create a fresh InMemorySaver for each Hypothesis example to avoid state persistence
         in_memory_saver = InMemorySaver()
@@ -348,10 +391,14 @@ class TestSyncAsyncEquivalence:
                     version_key = (*key_prefix, channel, version)
                     if version_key in version_store:
                         # Reuse the existing value for this version
-                        checkpoint["channel_values"][channel] = version_store[version_key]
+                        checkpoint["channel_values"][channel] = version_store[
+                            version_key
+                        ]
                     else:
                         # Store the value for this version
-                        version_store[version_key] = checkpoint["channel_values"][channel]
+                        version_store[version_key] = checkpoint["channel_values"][
+                            channel
+                        ]
 
                 # Put checkpoint in both sync and async
                 config = {
@@ -362,9 +409,17 @@ class TestSyncAsyncEquivalence:
                 }
 
                 # Pass channel_versions as new_versions parameter
-                result_sync = sync_saver.put(config, checkpoint, op.metadata, checkpoint["channel_versions"])
-                result_async = asyncio.run(async_saver.aput(config, checkpoint, op.metadata, checkpoint["channel_versions"]))
-                result_memory = in_memory_saver.put(config, checkpoint, op.metadata, checkpoint["channel_versions"])
+                result_sync = sync_saver.put(
+                    config, checkpoint, op.metadata, checkpoint["channel_versions"]
+                )
+                result_async = asyncio.run(
+                    async_saver.aput(
+                        config, checkpoint, op.metadata, checkpoint["channel_versions"]
+                    )
+                )
+                result_memory = in_memory_saver.put(
+                    config, checkpoint, op.metadata, checkpoint["channel_versions"]
+                )
 
                 # Results should be identical
                 assert result_sync == result_async
@@ -423,8 +478,12 @@ class TestSyncAsyncEquivalence:
                     config["configurable"]["checkpoint_id"] = checkpoint_id
 
                 result_sync = normalize_checkpoint_tuple(sync_saver.get_tuple(config))
-                result_async = normalize_checkpoint_tuple(asyncio.run(async_saver.aget_tuple(config)))
-                result_memory = normalize_checkpoint_tuple(in_memory_saver.get_tuple(config))
+                result_async = normalize_checkpoint_tuple(
+                    asyncio.run(async_saver.aget_tuple(config))
+                )
+                result_memory = normalize_checkpoint_tuple(
+                    in_memory_saver.get_tuple(config)
+                )
 
                 # All three should return the same result
                 assert result_sync == result_async
@@ -443,16 +502,26 @@ class TestSyncAsyncEquivalence:
                 if op.limit is not None:
                     kwargs["limit"] = op.limit
 
-                list_sync = normalize_checkpoint_tuple(sync_saver.list(config, **kwargs))
-                list_async = normalize_checkpoint_tuple(asyncio.run(self._async_list_to_list(async_saver.alist(config, **kwargs))))
-                list_memory = normalize_checkpoint_tuple(in_memory_saver.list(config, **kwargs))
+                list_sync = normalize_checkpoint_tuple(
+                    sync_saver.list(config, **kwargs)
+                )
+                list_async = normalize_checkpoint_tuple(
+                    asyncio.run(
+                        self._async_list_to_list(async_saver.alist(config, **kwargs))
+                    )
+                )
+                list_memory = normalize_checkpoint_tuple(
+                    in_memory_saver.list(config, **kwargs)
+                )
 
                 # Should have same number of results
                 assert len(list_sync) == len(list_async)
                 assert len(list_sync) == len(list_memory)
 
                 # Compare checkpoints (normalize pending_writes first)
-                for sync_tuple, async_tuple, memory_tuple in zip(list_sync, list_async, list_memory, strict=False):
+                for sync_tuple, async_tuple, memory_tuple in zip(
+                    list_sync, list_async, list_memory, strict=False
+                ):
                     assert sync_tuple == async_tuple
                     assert sync_tuple == memory_tuple
 
@@ -463,7 +532,9 @@ class TestSyncAsyncEquivalence:
                 in_memory_saver.delete_thread(op.thread_id)
 
                 # Remove from our tracking
-                keys_to_remove = [k for k in created_checkpoints.keys() if k[0] == op.thread_id]
+                keys_to_remove = [
+                    k for k in created_checkpoints.keys() if k[0] == op.thread_id
+                ]
                 for key in keys_to_remove:
                     del created_checkpoints[key]
 

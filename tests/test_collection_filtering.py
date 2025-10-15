@@ -70,9 +70,7 @@ def test_list_filtering_with_contains(saver_with_collections, sample_checkpoint)
         saver.put(base_config, cp, metadata, {})
 
     # Filter by tag that should match checkpoint-1 only
-    cassandra_checkpoints = list(
-        saver.list(base_config, filter={"tags": "cassandra"})
-    )
+    cassandra_checkpoints = list(saver.list(base_config, filter={"tags": "cassandra"}))
     assert len(cassandra_checkpoints) == 1
     assert cassandra_checkpoints[0].checkpoint["id"] == "checkpoint-1"
 
@@ -162,7 +160,9 @@ def test_map_key_value_filtering(saver_with_collections, sample_checkpoint):
 
     # Filter by specific key-value pair
     prod_us_east = list(
-        saver.list(base_config, filter={"attributes": {"env": "prod", "region": "us-east"}})
+        saver.list(
+            base_config, filter={"attributes": {"env": "prod", "region": "us-east"}}
+        )
     )
     assert len(prod_us_east) == 1
     assert prod_us_east[0].checkpoint["id"] == "checkpoint-1"

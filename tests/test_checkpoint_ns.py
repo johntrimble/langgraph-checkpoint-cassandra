@@ -23,7 +23,7 @@ def cassandra_session():
 
     # Ensure clean state
     drop_schema(session, keyspace=TEST_KEYSPACE)
-    
+
     # Schema will be created by the saver
 
     yield session
@@ -66,19 +66,21 @@ def sample_metadata():
     )
 
 
-def test_checkpoints_with_different_namespaces(saver, sample_checkpoint, sample_metadata):
+def test_checkpoints_with_different_namespaces(
+    saver, sample_checkpoint, sample_metadata
+):
     """
     Test that checkpoint_ns isolates checkpoints for different graph components.
-    
+
     This test simulates:
     1. A main graph with default namespace (empty string)
-    2. A subgraph with namespace "subgraph_1" 
+    2. A subgraph with namespace "subgraph_1"
     3. Another subgraph with namespace "subgraph_2"
-    
+
     All sharing the same thread_id but with separate checkpoint histories.
     """
     thread_id = "user-conversation-123"
-    
+
     # Create config for main graph (root level)
     root_config = {
         "configurable": {
@@ -86,7 +88,7 @@ def test_checkpoints_with_different_namespaces(saver, sample_checkpoint, sample_
             "checkpoint_ns": "",  # Default/root namespace
         }
     }
-    
+
     # Create config for first subgraph
     subgraph1_config = {
         "configurable": {
@@ -94,7 +96,7 @@ def test_checkpoints_with_different_namespaces(saver, sample_checkpoint, sample_
             "checkpoint_ns": "subgraph_1",  # Different namespace
         }
     }
-    
+
     # Create config for second subgraph
     subgraph2_config = {
         "configurable": {
@@ -102,7 +104,7 @@ def test_checkpoints_with_different_namespaces(saver, sample_checkpoint, sample_
             "checkpoint_ns": "subgraph_2",  # Different namespace
         }
     }
-    
+
     from langgraph.checkpoint.base.id import uuid6
 
     # Create checkpoints for main graph
@@ -131,15 +133,21 @@ def test_checkpoints_with_different_namespaces(saver, sample_checkpoint, sample_
     # Check that each namespace has its own checkpoint
     assert main_result is not None
     assert main_result.checkpoint["id"] == main_id1
-    assert main_result.checkpoint["channel_values"]["messages"] == ["Hello from main graph"]
+    assert main_result.checkpoint["channel_values"]["messages"] == [
+        "Hello from main graph"
+    ]
 
     assert subgraph1_result is not None
     assert subgraph1_result.checkpoint["id"] == subgraph1_id1
-    assert subgraph1_result.checkpoint["channel_values"]["messages"] == ["Hello from subgraph 1"]
+    assert subgraph1_result.checkpoint["channel_values"]["messages"] == [
+        "Hello from subgraph 1"
+    ]
 
     assert subgraph2_result is not None
     assert subgraph2_result.checkpoint["id"] == subgraph2_id1
-    assert subgraph2_result.checkpoint["channel_values"]["messages"] == ["Hello from subgraph 2"]
+    assert subgraph2_result.checkpoint["channel_values"]["messages"] == [
+        "Hello from subgraph 2"
+    ]
 
     # Now add more checkpoints to each namespace
     main_id2 = str(uuid6(-1))
@@ -149,38 +157,46 @@ def test_checkpoints_with_different_namespaces(saver, sample_checkpoint, sample_
 
     subgraph1_id2 = str(uuid6(-1))
     subgraph1_checkpoint2 = {**sample_checkpoint, "id": subgraph1_id2}
-    subgraph1_checkpoint2["channel_values"]["messages"] = ["Hello again from subgraph 1"]
+    subgraph1_checkpoint2["channel_values"]["messages"] = [
+        "Hello again from subgraph 1"
+    ]
     saver.put(subgraph1_config, subgraph1_checkpoint2, sample_metadata, {})
-    
+
     # List checkpoints for each namespace
     main_checkpoints = list(saver.list(root_config))
     subgraph1_checkpoints = list(saver.list(subgraph1_config))
     subgraph2_checkpoints = list(saver.list(subgraph2_config))
-    
+
     # Check that each namespace has the correct number of checkpoints
     assert len(main_checkpoints) == 2
     assert main_checkpoints[0].checkpoint["id"] == main_id2
     assert main_checkpoints[1].checkpoint["id"] == main_id1
-    
+
     assert len(subgraph1_checkpoints) == 2
     assert subgraph1_checkpoints[0].checkpoint["id"] == subgraph1_id2
     assert subgraph1_checkpoints[1].checkpoint["id"] == subgraph1_id1
-    
+
     assert len(subgraph2_checkpoints) == 1
     assert subgraph2_checkpoints[0].checkpoint["id"] == subgraph2_id1
-    
+
     # This demonstrates that all three namespaces maintain separate checkpoint histories
     # despite sharing the same thread_id
-    
+
     # Now test that delete_thread removes checkpoints from all namespaces
     saver.delete_thread(thread_id)
-    
+
     # Verify all checkpoints are gone from all namespaces
     main_checkpoints_after = list(saver.list(root_config))
     subgraph1_checkpoints_after = list(saver.list(subgraph1_config))
     subgraph2_checkpoints_after = list(saver.list(subgraph2_config))
-    
+
     # Check that all namespaces have no checkpoints
-    assert len(main_checkpoints_after) == 0, "Main namespace should have no checkpoints after deletion"
-    assert len(subgraph1_checkpoints_after) == 0, "Subgraph1 namespace should have no checkpoints after deletion"
-    assert len(subgraph2_checkpoints_after) == 0, "Subgraph2 namespace should have no checkpoints after deletion"
+    assert len(main_checkpoints_after) == 0, (
+        "Main namespace should have no checkpoints after deletion"
+    )
+    assert len(subgraph1_checkpoints_after) == 0, (
+        "Subgraph1 namespace should have no checkpoints after deletion"
+    )
+    assert len(subgraph2_checkpoints_after) == 0, (
+        "Subgraph2 namespace should have no checkpoints after deletion"
+    )

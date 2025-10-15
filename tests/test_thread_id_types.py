@@ -10,11 +10,16 @@ from langgraph.checkpoint.base import Checkpoint
 from langgraph_checkpoint_cassandra import CassandraSaver
 
 
-@pytest.mark.parametrize("thread_id_type,thread_id_value,keyspace_suffix", [
-    ("text", "my-custom-thread-id", "text"),
-    pytest.param("uuid", None, "uuid", id="uuid"),  # Will be generated in test
-    pytest.param("timeuuid", None, "timeuuid", id="timeuuid"),  # Will be generated in test
-])
+@pytest.mark.parametrize(
+    "thread_id_type,thread_id_value,keyspace_suffix",
+    [
+        ("text", "my-custom-thread-id", "text"),
+        pytest.param("uuid", None, "uuid", id="uuid"),  # Will be generated in test
+        pytest.param(
+            "timeuuid", None, "timeuuid", id="timeuuid"
+        ),  # Will be generated in test
+    ],
+)
 def test_thread_id_type(thread_id_type, thread_id_value, keyspace_suffix):
     """Test a specific thread_id_type configuration."""
     # Generate UUID values if needed
@@ -60,7 +65,9 @@ def test_thread_id_type(thread_id_type, thread_id_value, keyspace_suffix):
         actual_type = row.type
         print(f"✓ thread_id column type: {actual_type}")
         expected_type = thread_id_type
-        assert actual_type == expected_type, f"Type mismatch! Expected: {expected_type}, Got: {actual_type}"
+        assert actual_type == expected_type, (
+            f"Type mismatch! Expected: {expected_type}, Got: {actual_type}"
+        )
         print(f"✓ Type matches expected: {expected_type}")
 
         # Create a test checkpoint
@@ -108,7 +115,9 @@ def test_thread_id_type(thread_id_type, thread_id_value, keyspace_suffix):
         )
 
         assert retrieved is not None, "Failed to retrieve checkpoint"
-        print(f"✓ Retrieved checkpoint: {retrieved.config['configurable']['checkpoint_id']}")
+        print(
+            f"✓ Retrieved checkpoint: {retrieved.config['configurable']['checkpoint_id']}"
+        )
         print(f"  Channel values: {retrieved.checkpoint['channel_values']}")
 
         # List checkpoints

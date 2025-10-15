@@ -173,7 +173,9 @@ class BaseCassandraSaver(BaseCheckpointSaver):
             return None
 
         # Check if it's 32 hex characters (UUID without hyphens)
-        if len(checkpoint_id) == 32 and all(c in "0123456789abcdefABCDEF" for c in checkpoint_id):
+        if len(checkpoint_id) == 32 and all(
+            c in "0123456789abcdefABCDEF" for c in checkpoint_id
+        ):
             # Insert hyphens to make it a standard UUID string
             uuid_str = f"{checkpoint_id[:8]}-{checkpoint_id[8:12]}-{checkpoint_id[12:16]}-{checkpoint_id[16:20]}-{checkpoint_id[20:]}"
             try:
@@ -254,9 +256,7 @@ class BaseCassandraSaver(BaseCheckpointSaver):
             columns.append((column_name, cql_type))
         return columns
 
-    def _should_add_allow_filtering(
-        self, filter_dict: dict[str, Any]
-    ) -> bool:
+    def _should_add_allow_filtering(self, filter_dict: dict[str, Any]) -> bool:
         """
         Determine if ALLOW FILTERING is needed for a given filter.
 
@@ -277,7 +277,9 @@ class BaseCassandraSaver(BaseCheckpointSaver):
 
             # Need ALLOW FILTERING for map key-value filtering
             field_type = self.queryable_metadata[field_name]
-            if (field_type is dict or (hasattr(field_type, "__origin__") and field_type.__origin__ is dict)):
+            if field_type is dict or (
+                hasattr(field_type, "__origin__") and field_type.__origin__ is dict
+            ):
                 if isinstance(field_value, dict):
                     # Filtering map[key]=value requires ALLOW FILTERING
                     return True

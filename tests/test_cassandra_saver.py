@@ -22,7 +22,7 @@ def cassandra_session():
 
     # Ensure clean state
     drop_schema(session, keyspace=TEST_KEYSPACE)
-    
+
     # Schema will be created by the saver
 
     yield session

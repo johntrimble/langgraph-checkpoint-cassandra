@@ -18,10 +18,10 @@ def cassandra_session():
     """Create a Cassandra session for testing."""
     cluster = Cluster(["cassandra"])
     session = cluster.connect()
-    
+
     # Ensure clean state by dropping the keyspace
     drop_schema(session, keyspace=TEST_KEYSPACE)
-    
+
     # We'll create the schema through the saver's setup method in each test
 
     yield session
@@ -132,6 +132,7 @@ def test_checkpoint_writes_with_ttl_expire(saver_with_ttl):
         "configurable": {"thread_id": "test-thread-writes-ttl", "checkpoint_ns": ""}
     }
     import uuid
+
     checkpoint_id = str(uuid.uuid4())
     checkpoint = Checkpoint(
         v=1,
