@@ -1,6 +1,7 @@
 /data
 .env
 /reference_repositories
+/.hypothesis
 
 # Python-generated files
 __pycache__/

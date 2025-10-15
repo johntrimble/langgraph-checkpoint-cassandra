@@ -6,7 +6,7 @@ This guide covers how to set up a development environment for contributing to la
 
 - Docker and Docker Compose
 - Git
-- Python 3.9+
+- Python 3.12+
 
 ## Development Environment Setup
 
@@ -21,9 +21,7 @@ cd langgraph-checkpoint-cassandra
 ```
 
 The bootstrap script will:
-- Start the Cassandra container
-- Set up the development environment
-- Install dependencies
+- Setup a `.env` file for development
 
 ### 2. Development Container (VSCode)
 
@@ -37,22 +35,6 @@ If using VSCode, the project includes a devcontainer configuration:
 Alternatively, manually reopen:
 - Press `Cmd/Ctrl+Shift+P`
 - Select "Dev Containers: Reopen in Container"
-
-### 3. Manual Setup (Without Devcontainer)
-
-If not using devcontainers:
-
-```bash
-# Start Cassandra
-docker-compose up -d cassandra
-
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # On Windows: venv\Scripts\activate
-
-# Install dependencies
-pip install -e ".[dev]"
-```
 
 
 ## Connecting to Cassandra
@@ -99,7 +81,7 @@ Access the Cassandra CQL shell:
 
 ```bash
 # From inside container
-docker-compose exec cassandra cqlsh
+docker compose exec cassandra cqlsh
 
 # From host (if cqlsh installed)
 cqlsh localhost 9042
@@ -184,13 +166,6 @@ pytest
 ### 4. Format Code
 
 ```bash
-# Format with black
-black langgraph_checkpoint_cassandra tests examples
-
-# Sort imports
-isort langgraph_checkpoint_cassandra tests examples
-
-# Lint with ruff
 ruff check langgraph_checkpoint_cassandra tests examples
 ```
 

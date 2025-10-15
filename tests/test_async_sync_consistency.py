@@ -7,17 +7,25 @@ produce identical results for the same sequences of operations.
 
 import asyncio
 import copy
-import uuid6
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Any, Iterable, override
+from typing import Any, override
 
 import pytest
-from hypothesis import given, settings, strategies as st, HealthCheck
+import uuid6
 from cassandra.cluster import Cluster
 from cassandra_asyncio.cluster import Cluster as AsyncCluster
-from langgraph.checkpoint.base import Checkpoint, CheckpointMetadata, CheckpointTuple, WRITES_IDX_MAP
-from langgraph_checkpoint_cassandra import CassandraSaver, AsyncCassandraSaver
+from hypothesis import HealthCheck, given, settings
+from hypothesis import strategies as st
+from langgraph.checkpoint.base import (
+    WRITES_IDX_MAP,
+    Checkpoint,
+    CheckpointMetadata,
+    CheckpointTuple,
+)
 from langgraph.checkpoint.memory import InMemorySaver
+
+from langgraph_checkpoint_cassandra import AsyncCassandraSaver, CassandraSaver
 
 
 # Operation types for our stateful tests
@@ -186,7 +194,7 @@ def savers(clusters):
     async_session = async_cluster.connect()
 
     # Use separate keyspaces for sync and async
-    keyspace_base = f"test_hypothesis"
+    keyspace_base = "test_hypothesis"
     sync_keyspace = f"{keyspace_base}_sync"
     async_keyspace = f"{keyspace_base}_async"
 
@@ -199,7 +207,7 @@ def savers(clusters):
 
     # Create async saver and setup schema
     async_saver = AsyncCassandraSaver(async_session, keyspace=async_keyspace)
-    asyncio.run(async_saver.setup(replication_factor=1))
+    asyncio.run(async_saver.asetup(replication_factor=1))
 
     yield sync_saver, async_saver
 
@@ -444,14 +452,14 @@ class TestSyncAsyncEquivalence:
                 assert len(list_sync) == len(list_memory)
 
                 # Compare checkpoints (normalize pending_writes first)
-                for sync_tuple, async_tuple, memory_tuple in zip(list_sync, list_async, list_memory):
+                for sync_tuple, async_tuple, memory_tuple in zip(list_sync, list_async, list_memory, strict=False):
                     assert sync_tuple == async_tuple
                     assert sync_tuple == memory_tuple
 
             elif isinstance(op, DeleteThreadOperation):
                 # Delete thread in all three
                 sync_saver.delete_thread(op.thread_id)
-                asyncio.run(async_saver.delete_thread(op.thread_id))
+                asyncio.run(async_saver.adelete_thread(op.thread_id))
                 in_memory_saver.delete_thread(op.thread_id)
 
                 # Remove from our tracking

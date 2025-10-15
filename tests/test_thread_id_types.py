@@ -2,8 +2,8 @@
 """Test different thread_id_type configurations."""
 
 import uuid
-import pytest
 
+import pytest
 from cassandra.cluster import Cluster
 from langgraph.checkpoint.base import Checkpoint
 

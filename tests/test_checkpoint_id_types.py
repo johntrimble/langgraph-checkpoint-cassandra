@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 """Test that TIMEUUID schema changes work correctly."""
 
-import pytest
 import uuid
 
+import pytest
 from cassandra.cluster import Cluster
 from langgraph.checkpoint.base import Checkpoint
 from langgraph.checkpoint.base.id import uuid6

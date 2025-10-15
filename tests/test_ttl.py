@@ -50,6 +50,7 @@ def saver_without_ttl(cassandra_session):
 def test_checkpoint_without_ttl_persists(saver_without_ttl):
     """Test that checkpoints without TTL persist indefinitely."""
     import uuid
+
     from langgraph.checkpoint.base import Checkpoint
 
     # Create a checkpoint
@@ -86,6 +87,7 @@ def test_checkpoint_without_ttl_persists(saver_without_ttl):
 def test_checkpoint_with_ttl_expires(saver_with_ttl):
     """Test that checkpoints with TTL expire after the specified time."""
     import uuid
+
     from langgraph.checkpoint.base import Checkpoint
 
     # Create a checkpoint
