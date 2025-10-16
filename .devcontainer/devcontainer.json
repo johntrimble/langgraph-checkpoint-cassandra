@@ -27,7 +27,7 @@
       // Default settings for VS Code inside the container.
       "settings": {
         // Sets the default Python interpreter to the one in the virtual
-        // environment. This virtual environment is created by entrypoint.sh.
+        // environment.
         "python.defaultInterpreterPath": "${containerEnv:UV_PROJECT_ENVIRONMENT}/bin/python"
       },
       // Extensions to install in VS Code inside the container.
