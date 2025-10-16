@@ -15,6 +15,8 @@ jobs:
 
     - name: Bootstrap
       run: |
+        echo $PWD
+        ls -La .
         ./script/bootstrap.sh
         cat .env
 
