@@ -22,9 +22,7 @@ jobs:
 
     - name: Build dev container with cache
       run: |
-        COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_BUILDKIT=1 docker compose build dev
-      env:
-        BUILDX_CACHE_SCOPE: test-${{ github.ref_name }}
+        docker buildx bake -f compose.yaml --set dev.cache-from=type=gha,scope=test-${{ github.ref_name }} --set dev.cache-to=type=gha,mode=max,scope=test-${{ github.ref_name }} --load dev
 
     - name: Run tests in dev container
       run: |

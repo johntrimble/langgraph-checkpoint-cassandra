@@ -33,12 +33,6 @@ services:
         # These are set in the .env file, which is initialized by script/bootstrap.
         UID: ${MY_UID}
         GID: ${MY_GID}
-      # Cache configuration for faster builds in CI/CD
-      # These use GitHub Actions cache when BUILDX_CACHE_FROM/TO are set
-      cache_from:
-        - type=gha,scope=${BUILDX_CACHE_SCOPE:-dev}
-      cache_to:
-        - type=gha,mode=max,scope=${BUILDX_CACHE_SCOPE:-dev}
 
     # Mount the project root and data directory into the container.
     # This allows code and data changes on the host to be reflected in the container.
