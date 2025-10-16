@@ -126,17 +126,10 @@ COPY --from=builder --chown=${USERNAME}:${USERNAME} /opt/uv-cache /opt/uv-cache
 # Create /workspace and /data directories
 RUN mkdir -p /workspace /data && chown -R $USERNAME:$USERNAME /workspace /data
 
-# Echo UID and GID for vscode user
-RUN echo "UID: $(id -u $USERNAME), GID: $(id -g $USERNAME)"
-# Echo out owner of /data directory
-RUN ls -ld /data
-
 USER root
 # Add ENTRYPOINT script
 COPY . /docker/
 RUN chmod +x /docker/entrypoint.sh && chown $USERNAME:$USERNAME /docker/entrypoint.sh
-# Echo out listing of files and owners in / for debugging
-RUN ls -la /
 ENTRYPOINT ["/docker/entrypoint.sh"]
 
 # Set the environment variable to use the virtual environment
