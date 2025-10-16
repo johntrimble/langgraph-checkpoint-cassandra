@@ -29,6 +29,7 @@ import sys
 from typing import Annotated
 
 from cassandra.cluster import Cluster
+from langchain_core.messages import AIMessage, BaseMessage, HumanMessage
 from langgraph.graph import END, START, StateGraph
 from langgraph.graph.message import add_messages
 from typing_extensions import TypedDict
@@ -40,7 +41,7 @@ from langgraph_checkpoint_cassandra import CassandraSaver
 class State(TypedDict):
     """State for our chatbot."""
 
-    messages: Annotated[list, add_messages]
+    messages: Annotated[list[BaseMessage], add_messages]
 
 
 # Define the chatbot node
@@ -55,14 +56,7 @@ def chatbot(state: State):
     num_messages = len(messages)
 
     # Count user messages
-    user_messages = [
-        m
-        for m in messages
-        if (
-            (hasattr(m, "type") and m.type == "human")
-            or (isinstance(m, dict) and m.get("role") == "user")
-        )
-    ]
+    user_messages = [m for m in messages if m.type == "human"]
 
     # Create a friendly response showing the history
     if num_messages == 1:
@@ -70,9 +64,9 @@ def chatbot(state: State):
     else:
         response = f"I see we've exchanged {num_messages} messages so far. "
         response += f"You've sent {len(user_messages)} message(s) to me. "
-        response += f'Your last message was: "{messages[-1].content if hasattr(messages[-1], "content") else messages[-1].get("content", "")}"'
+        response += f'Your last message was: "{messages[-1].content}"'
 
-    return {"messages": [{"role": "assistant", "content": response}]}
+    return {"messages": [AIMessage(content=response)]}
 
 
 def create_graph(checkpointer):
@@ -89,15 +83,15 @@ def create_graph(checkpointer):
 
 def setup_cassandra(keyspace="example_checkpoints"):
     """Setup Cassandra connection and schema."""
-    print("Connecting to Cassandra...")
+    print("Connecting to Cassandra... ", end="", flush=True)
     cluster = Cluster(["cassandra"])
     session = cluster.connect()
-    print("✓ Connected")
+    print("Connected")
 
-    print(f"Setting up keyspace '{keyspace}'...")
+    print(f"Setting up keyspace '{keyspace}'... ", end="", flush=True)
     checkpointer = CassandraSaver(session, keyspace=keyspace, thread_id_type="text")
     checkpointer.setup(replication_factor=1)  # RF=1 for single-node dev environment
-    print("✓ Schema ready")
+    print("Done")
 
     return session, cluster, checkpointer
 
@@ -122,13 +116,13 @@ def interactive_chat(
     checkpoint_tuple = checkpointer.get_tuple(config)
     if checkpoint_tuple:
         num_messages = len(checkpoint_tuple.checkpoint["channel_values"]["messages"])
-        print(f"✓ Found existing conversation with {num_messages} messages")
+        print(f"Found existing conversation with {num_messages} messages")
 
         # Show recent history
         if num_messages > 0:
             show_history(checkpoint_tuple, limit=6)
     else:
-        print("✓ Starting new conversation")
+        print("Starting new conversation")
 
     print("\n" + "=" * 60)
     print("Commands:")
@@ -159,17 +153,12 @@ def interactive_chat(
 
             # Process message
             result = graph.invoke(
-                {"messages": [{"role": "user", "content": user_input}]}, config=config
+                {"messages": [HumanMessage(content=user_input)]}, config=config
             )
 
             # Extract and print bot's response
             last_msg = result["messages"][-1]
-            content = (
-                last_msg.content
-                if hasattr(last_msg, "content")
-                else last_msg["content"]
-            )
-            print(f"Bot: {content}\n")
+            print(f"Bot: {last_msg.content}\n")
 
         except KeyboardInterrupt:
             print("\n\nSession interrupted. Your conversation has been saved.")
@@ -188,15 +177,8 @@ def show_history(checkpoint_tuple, limit=None):
     print("\nRecent history:")
     start_idx = max(0, len(messages) - limit) if limit else 0
     for msg in messages[start_idx:]:
-        # Determine if it's a user or assistant message
-        is_user = (
-            (hasattr(msg, "type") and msg.type == "human")
-            or (isinstance(msg, dict) and msg.get("role") == "user")
-            or (hasattr(msg, "__class__") and "Human" in msg.__class__.__name__)
-        )
-        content = msg.content if hasattr(msg, "content") else msg.get("content", "")
-        prefix = "You" if is_user else "Bot"
-        print(f"  {prefix}: {content}")
+        prefix = "You" if msg.type == "human" else "Bot"
+        print(f"  {prefix}: {msg.content}")
 
 
 def show_conversation_history(checkpointer, config):
@@ -212,15 +194,8 @@ def show_conversation_history(checkpointer, config):
     print("=" * 60)
 
     for i, msg in enumerate(messages, 1):
-        # Determine if it's a user or assistant message
-        is_user = (
-            (hasattr(msg, "type") and msg.type == "human")
-            or (isinstance(msg, dict) and msg.get("role") == "user")
-            or (hasattr(msg, "__class__") and "Human" in msg.__class__.__name__)
-        )
-        content = msg.content if hasattr(msg, "content") else msg.get("content", "")
-        prefix = "You" if is_user else "Bot"
-        print(f"{i}. {prefix}: {content}")
+        prefix = "You" if msg.type == "human" else "Bot"
+        print(f"{i}. {prefix}: {msg.content}")
     print()
 
 
@@ -375,7 +350,7 @@ Examples:
         else:
             # Always run interactive mode
             graph = create_graph(checkpointer)
-            print("✓ Conversation graph ready\n")
+            print("Conversation graph ready\n")
             interactive_chat(graph, checkpointer, args.thread_id, args.checkpoint_id)
 
     finally:
