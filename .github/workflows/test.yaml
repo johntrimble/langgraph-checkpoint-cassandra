@@ -21,8 +21,14 @@ jobs:
         ./script/bootstrap
 
     - name: Build dev container with cache
-      run: |
-        docker buildx bake -f compose.yaml --set dev.cache-from=type=gha,scope=test-${{ github.ref_name }} --set dev.cache-to=type=gha,mode=max,scope=test-${{ github.ref_name }} --load dev
+      uses: docker/bake-action@v5
+      with:
+        files: docker-bake.hcl
+        targets: dev
+        load: true
+        set: |
+          dev.cache-from=type=gha,scope=lint
+          dev.cache-to=type=gha,mode=max,scope=lint
 
     - name: Run tests in dev container
       run: |
