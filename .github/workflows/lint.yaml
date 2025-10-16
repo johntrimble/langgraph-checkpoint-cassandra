@@ -22,13 +22,7 @@ jobs:
 
     - name: Build dev container with cache
       run: |
-        echo "Cache scope: lint-${{ github.ref_name }}"
-        docker buildx bake -f docker-bake.hcl \
-          --set dev.cache-from=type=gha,scope=lint-${{ github.ref_name }} \
-          --set dev.cache-to=type=gha,mode=max,scope=lint-${{ github.ref_name }} \
-          --set dev.tags=langgraph-checkpoint-cassandra-dev \
-          --load \
-          --progress=plain dev
+        docker buildx bake -f compose.yaml --set dev.cache-from=type=gha,scope=lint-${{ github.ref_name }} --set dev.cache-to=type=gha,mode=max,scope=lint-${{ github.ref_name }} --load dev
 
     - name: Check formatting with ruff
       run: |

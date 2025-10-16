@@ -22,8 +22,6 @@ services:
     # Inherits common settings from the base service anchor above.
     <<: *base-service
 
-    image: langgraph-checkpoint-cassandra-dev
-
     build:
       # Build context is the dev Dockerfile directory
       context: ./services/dev/
