@@ -25,7 +25,6 @@ jobs:
       with:
         source: "."
         files: "compose.yaml"
-        workdir: "./docker"
         push: false
         load: true
         set: |
