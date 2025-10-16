@@ -36,7 +36,9 @@ def cassandra_session():
 def saver(cassandra_session):
     """Provide a fresh CassandraSaver for each test."""
     # Use text type for checkpoint_id to maintain compatibility with test data
-    saver = CassandraSaver(cassandra_session, keyspace=TEST_KEYSPACE, checkpoint_id_type="text")
+    saver = CassandraSaver(
+        cassandra_session, keyspace=TEST_KEYSPACE, checkpoint_id_type="text"
+    )
     saver.setup(replication_factor=1)  # Create schema
     return saver
 

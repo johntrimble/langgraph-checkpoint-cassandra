@@ -347,7 +347,9 @@ class CassandraSaver(BaseCheckpointSaver):
                 # Fall back to sync driver
                 cluster = Cluster(contact_points, port=port)
                 session = cluster.connect()
-                logger.info("Using sync Cassandra driver (async operations not available)")
+                logger.info(
+                    "Using sync Cassandra driver (async operations not available)"
+                )
 
             saver = cls(session, keyspace=keyspace, **kwargs)
             yield saver
