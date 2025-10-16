@@ -130,7 +130,8 @@ USER root
 # Add ENTRYPOINT script
 COPY . /docker/
 RUN chmod +x /docker/entrypoint.sh && chown $USERNAME:$USERNAME /docker/entrypoint.sh
-RUN echo ls -la /
+# Echo out listing of files and owners in / for debugging
+RUN ls -la /
 ENTRYPOINT ["/docker/entrypoint.sh"]
 
 # Set the environment variable to use the virtual environment
