@@ -40,9 +40,7 @@ def cassandra_session():
 @pytest.fixture
 def uuid_saver(cassandra_session):
     # Create saver with uuid type (default)
-    saver = CassandraSaver(
-        cassandra_session, keyspace=TEST_KEYSPACE
-    )
+    saver = CassandraSaver(cassandra_session, keyspace=TEST_KEYSPACE)
 
     saver.setup(replication_factor=1)
 

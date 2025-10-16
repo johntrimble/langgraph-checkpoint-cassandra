@@ -65,6 +65,7 @@ ARG USERNAME=vscode
 ARG UID=1000
 ARG GID=1000
 ENV DOCKER_USER=${USERNAME}
+
 RUN set -eux; \
     EXISTING_GROUP=$(getent group $GID | cut -d: -f1 || true); \
     if [ -z "$EXISTING_GROUP" ]; then \
@@ -122,8 +123,8 @@ COPY --from=builder --chown=${USERNAME}:${USERNAME} /opt/venv /opt/venv
 COPY --from=builder --chown=${USERNAME}:${USERNAME} /opt/uv-bin /opt/uv-bin
 COPY --from=builder --chown=${USERNAME}:${USERNAME} /opt/uv-cache /opt/uv-cache
 
-# Create /workspace directory
-RUN mkdir -p /workspace && chown $USERNAME:$USERNAME /workspace
+# Create /workspace and /data directories
+RUN mkdir -p /workspace /data && chown -R $USERNAME:$USERNAME /workspace /data
 
 USER root
 # Add ENTRYPOINT script

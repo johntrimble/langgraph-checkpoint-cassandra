@@ -54,8 +54,9 @@ services:
 
     # Connect to the cassandra cluster
     depends_on:
-      - cassandra
-      
+      cassandra:
+        condition: service_healthy
+
   # Single node Cassandra cluster
   cassandra:
     image: cassandra:5.0
@@ -75,6 +76,13 @@ services:
     volumes:
       # Persist Cassandra data
       - cassandra_data:/var/lib/cassandra
+    healthcheck:
+      # Use cqlsh to check if Cassandra is ready to accept connections
+      test: ["CMD-SHELL", "cqlsh -e 'describe cluster' || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 60s
 
 volumes:
   claude_data:
