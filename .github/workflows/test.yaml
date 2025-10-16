@@ -22,7 +22,7 @@ jobs:
 
     - name: Build dev container with cache
       run: |
-        docker compose build dev
+        COMPOSE_DOCKER_CLI_BUILD=1 DOCKER_BUILDKIT=1 docker compose build dev
       env:
         BUILDX_CACHE_SCOPE: test-${{ github.ref_name }}
 
