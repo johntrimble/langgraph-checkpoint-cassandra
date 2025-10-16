@@ -15,7 +15,7 @@ jobs:
 
     - name: Bootstrap
       run: |
-        ./scripts/bootstrap.sh
+        ./script/bootstrap.sh
         cat .env
 
     - name: Check formatting with ruff
