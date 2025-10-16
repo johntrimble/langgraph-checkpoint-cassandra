@@ -318,6 +318,12 @@ class CassandraSaver(BaseCheckpointSaver):
         """
         Create a CassandraSaver from connection information.
 
+        This method will attempt to use the async driver (cassandra-asyncio-driver)
+        if available, falling back to the sync driver (cassandra-driver) if not.
+
+        To use async operations, install cassandra-asyncio-driver:
+            pip install cassandra-asyncio-driver
+
         Args:
             contact_points: List of Cassandra node addresses
             port: Cassandra port (default: 9042)
@@ -325,13 +331,25 @@ class CassandraSaver(BaseCheckpointSaver):
             **kwargs: Additional arguments for Cluster or CassandraSaver
 
         Yields:
-            CassandraSaver instance
+            CassandraSaver instance with async support if cassandra-asyncio-driver
+            is installed, otherwise with sync-only support
         """
         cluster = None
         try:
-            cluster = Cluster(contact_points, port=port)
-            session = cluster.connect()
-            saver = cls(session, keyspace=keyspace)
+            # Try async driver first
+            try:
+                from cassandra_asyncio.cluster import Cluster as AsyncCluster
+
+                cluster = AsyncCluster(contact_points, port=port)
+                session = cluster.connect()
+                logger.info("Using async Cassandra driver (cassandra-asyncio-driver)")
+            except ImportError:
+                # Fall back to sync driver
+                cluster = Cluster(contact_points, port=port)
+                session = cluster.connect()
+                logger.info("Using sync Cassandra driver (async operations not available)")
+
+            saver = cls(session, keyspace=keyspace, **kwargs)
             yield saver
         finally:
             if cluster:
@@ -1021,13 +1039,16 @@ class CassandraSaver(BaseCheckpointSaver):
         """
         if not hasattr(self.session, "aexecute"):
             raise NotImplementedError(
-                "Async operations require cassandra-asyncio driver.\n"
-                "Install with: pip install cassandra-driver[asyncio]\n"
-                "Then create session using:\n"
-                "  from cassandra_asyncio.cluster import Cluster\n"
-                "  cluster = Cluster(['localhost'])\n"
-                "  session = cluster.connect()\n"
-                "  # session now has aexecute() method for async operations"
+                "Async operations require an async Cassandra session.\n\n"
+                "To enable async support:\n"
+                "1. Install the async driver:\n"
+                "   pip install cassandra-asyncio-driver\n\n"
+                "2. Create an async session and pass it to CassandraSaver:\n"
+                "   from cassandra_asyncio.cluster import Cluster\n"
+                "   cluster = Cluster(['localhost'])\n"
+                "   session = cluster.connect()\n"
+                "   checkpointer = CassandraSaver(session)\n\n"
+                "The CassandraSaver will automatically detect async support and enable async methods."
             )
 
     async def aget_tuple(self, config: RunnableConfig) -> CheckpointTuple | None:

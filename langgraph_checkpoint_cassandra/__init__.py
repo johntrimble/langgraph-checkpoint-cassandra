@@ -15,8 +15,3 @@ __all__ = [
     "MigrationManager",
     "Migration",
 ]
-
-# For backward compatibility, provide AsyncCassandraSaver as an alias
-# The unified CassandraSaver now supports both sync and async operations
-AsyncCassandraSaver = CassandraSaver
-__all__.append("AsyncCassandraSaver")

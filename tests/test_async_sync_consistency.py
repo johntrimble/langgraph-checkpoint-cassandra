@@ -1,7 +1,7 @@
 """
 Property-based tests using Hypothesis to verify async and sync implementations behave identically.
 
-These tests use stateful property-based testing to verify that CassandraSaver and AsyncCassandraSaver
+These tests use stateful property-based testing to verify that CassandraSaver with sync and async sessions
 produce identical results for the same sequences of operations.
 """
 
@@ -25,7 +25,7 @@ from langgraph.checkpoint.base import (
 )
 from langgraph.checkpoint.memory import InMemorySaver
 
-from langgraph_checkpoint_cassandra import AsyncCassandraSaver, CassandraSaver
+from langgraph_checkpoint_cassandra import CassandraSaver
 
 
 # Operation types for our stateful tests
@@ -232,8 +232,8 @@ def savers(clusters):
     sync_saver = CassandraSaver(sync_session, keyspace=sync_keyspace)
     sync_saver.setup(replication_factor=1)
 
-    # Create async saver and setup schema
-    async_saver = AsyncCassandraSaver(async_session, keyspace=async_keyspace)
+    # Create async saver (with async session) and setup schema
+    async_saver = CassandraSaver(async_session, keyspace=async_keyspace)
     async_saver.setup(replication_factor=1)
 
     yield sync_saver, async_saver

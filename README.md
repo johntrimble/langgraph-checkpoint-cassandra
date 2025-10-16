@@ -5,11 +5,12 @@ Implementation of LangGraph CheckpointSaver that uses Apache Cassandra.
 ## Installation
 
 ```bash
-# For sync operations only
 pip install langgraph-checkpoint-cassandra
+```
 
-# For async operations (includes cassandra-asyncio-driver)
-pip install langgraph-checkpoint-cassandra[async]
+For async operations, also install the async Cassandra driver:
+```bash
+pip install cassandra-asyncio-driver
 ```
 
 ## Usage
@@ -17,7 +18,7 @@ pip install langgraph-checkpoint-cassandra[async]
 ### Important Note
 When using the Cassandra checkpointer for the first time, call `.setup()` to create the required tables.
 
-### Sync Example (CassandraSaver)
+### Synchronous Usage
 
 ```python
 from cassandra.cluster import Cluster
@@ -56,24 +57,25 @@ result = app.invoke({"messages": [HumanMessage(content="Hello!")]}, config=confi
 cluster.shutdown()
 ```
 
-### Async Example (AsyncCassandraSaver)
+### Asynchronous Usage
 
-For high-concurrency scenarios (100s-1000s of concurrent operations), use `AsyncCassandraSaver` with true async I/O:
+For high-concurrency scenarios (web servers, concurrent operations), use `CassandraSaver` with an async session:
 
 ```python
 from cassandra_asyncio.cluster import Cluster
-from langgraph_checkpoint_cassandra import AsyncCassandraSaver
+from langgraph_checkpoint_cassandra import CassandraSaver
 from langgraph.graph import StateGraph, MessagesState, START, END
 from langchain_core.messages import HumanMessage, AIMessage
 
 async def main():
-    # Connect to Cassandra (note: using cassandra_asyncio)
+    # Connect to Cassandra using async driver
     cluster = Cluster(['localhost'])
     session = cluster.connect()
 
-    # Create async checkpointer and setup schema
-    checkpointer = AsyncCassandraSaver(session, keyspace='my_checkpoints')
-    await checkpointer.setup()  # Note: async setup()
+    # Create checkpointer with async session
+    # CassandraSaver automatically detects async support
+    checkpointer = CassandraSaver(session, keyspace='my_checkpoints')
+    checkpointer.setup()  # Setup is still sync
 
     # Build your graph
     def echo_bot(state: MessagesState):
@@ -85,10 +87,10 @@ async def main():
     graph.add_edge(START, "chat")
     graph.add_edge("chat", END)
 
-    # Compile with async checkpointer
+    # Compile with checkpointer
     app = graph.compile(checkpointer=checkpointer)
 
-    # Use with async LangGraph
+    # Use async methods with LangGraph
     config = {"configurable": {"thread_id": "user-456"}}
     result = await app.ainvoke({"messages": [HumanMessage(content="Hello async!")]}, config=config)
 
@@ -100,20 +102,20 @@ import asyncio
 asyncio.run(main())
 ```
 
-**When to use AsyncCassandraSaver:**
+**When to use async:**
 - Web servers handling many concurrent requests (FastAPI, aiohttp, etc.)
 - Applications with 100s-1000s of concurrent checkpoint operations
 - Scenarios requiring maximum I/O throughput
 
-**When to use CassandraSaver (sync):**
+**When to use sync:**
 - Single-threaded applications
 - Sequential checkpoint operations
 - Simpler code without async/await complexity
 - Most typical LangGraph use cases
 
-**Note:** `AsyncCassandraSaver` requires the `cassandra-asyncio-driver` package. Install with:
+**Note:** Async operations require the `cassandra-asyncio-driver` package. Install with:
 ```bash
-pip install langgraph-checkpoint-cassandra[async]
+pip install cassandra-asyncio-driver
 ```
 
 ## Schema
