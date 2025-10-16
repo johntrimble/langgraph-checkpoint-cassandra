@@ -65,7 +65,7 @@ ARG USERNAME=vscode
 ARG UID=1000
 ARG GID=1000
 ENV DOCKER_USER=${USERNAME}
-RUN echo "Creating user ${USERNAME} with UID ${UID} and GID ${GID}"
+
 RUN set -eux; \
     EXISTING_GROUP=$(getent group $GID | cut -d: -f1 || true); \
     if [ -z "$EXISTING_GROUP" ]; then \
@@ -130,6 +130,7 @@ USER root
 # Add ENTRYPOINT script
 COPY . /docker/
 RUN chmod +x /docker/entrypoint.sh && chown $USERNAME:$USERNAME /docker/entrypoint.sh
+RUN echo ls -la /
 ENTRYPOINT ["/docker/entrypoint.sh"]
 
 # Set the environment variable to use the virtual environment

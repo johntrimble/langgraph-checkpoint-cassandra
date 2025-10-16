@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 set -e
 
+# Echo whoami along with UID and GID
+echo "Running as user: $(whoami) (UID: $(id -u), GID: $(id -g))"
+
 # Setup the .cache directory for the docker user
 DOCKER_USER_CACHE_DIR="/home/$DOCKER_USER/.cache"
 DATA_CACHE_DIR="/data/.cache"
