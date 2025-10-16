@@ -13,6 +13,11 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    - name: Bootstrap
+      run: |
+        ./scripts/bootstrap.sh
+        cat .env
+
     - name: Start Cassandra with Docker Compose
       run: |
         docker compose up -d cassandra

@@ -13,6 +13,11 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    - name: Bootstrap
+      run: |
+        ./scripts/bootstrap.sh
+        cat .env
+
     - name: Check formatting with ruff
       run: |
         docker compose run --rm dev ruff format --check .
