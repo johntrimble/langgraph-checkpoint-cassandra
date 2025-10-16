@@ -124,7 +124,12 @@ COPY --from=builder --chown=${USERNAME}:${USERNAME} /opt/uv-bin /opt/uv-bin
 COPY --from=builder --chown=${USERNAME}:${USERNAME} /opt/uv-cache /opt/uv-cache
 
 # Create /workspace and /data directories
-RUN mkdir -p /workspace /data && chown $USERNAME:$USERNAME /workspace /data
+RUN mkdir -p /workspace /data && chown -R $USERNAME:$USERNAME /workspace /data
+
+# Echo UID and GID for vscode user
+RUN echo "UID: $(id -u $USERNAME), GID: $(id -g $USERNAME)"
+# Echo out owner of /data directory
+RUN ls -ld /data
 
 USER root
 # Add ENTRYPOINT script
