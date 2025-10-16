@@ -43,7 +43,7 @@ def get_schema_version(
     """
     try:
         result = session.execute(f"""
-            SELECT MAX(v) as version FROM {keyspace}.checkpoint_migrations
+            SELECT MAX(version) as version FROM {keyspace}.checkpoint_migrations
         """)
         row = result.one()
         return row.version if row else None

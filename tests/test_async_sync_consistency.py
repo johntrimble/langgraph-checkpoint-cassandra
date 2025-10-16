@@ -234,7 +234,7 @@ def savers(clusters):
 
     # Create async saver and setup schema
     async_saver = AsyncCassandraSaver(async_session, keyspace=async_keyspace)
-    asyncio.run(async_saver.asetup(replication_factor=1))
+    async_saver.setup(replication_factor=1)
 
     yield sync_saver, async_saver
 
