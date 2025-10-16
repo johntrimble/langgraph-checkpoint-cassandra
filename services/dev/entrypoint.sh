@@ -4,6 +4,14 @@ set -e
 # Echo whoami along with UID and GID
 echo "Running as user: $(whoami) (UID: $(id -u), GID: $(id -g))"
 
+# Display permissions of data directory itself
+echo "Permissions of /data directory:"
+ls -ld /data || echo "/data does not exist or is not accessible"
+
+# Display content and permissions of /data
+echo "Contents of /data:"
+ls -la /data || echo "/data does not exist or is not accessible"
+
 # Setup the .cache directory for the docker user
 DOCKER_USER_CACHE_DIR="/home/$DOCKER_USER/.cache"
 DATA_CACHE_DIR="/data/.cache"
