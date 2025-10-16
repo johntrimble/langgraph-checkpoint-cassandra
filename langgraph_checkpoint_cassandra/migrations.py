@@ -105,7 +105,7 @@ class MigrationManager:
         session: Session,
         keyspace: str = DEFAULT_KEYSPACE,
         thread_id_type: str = "text",
-        checkpoint_id_type: str = "text",
+        checkpoint_id_type: str = "uuid",
         replication_factor: int = 3,
     ):
         """
@@ -114,8 +114,8 @@ class MigrationManager:
         Args:
             session: Cassandra session
             keyspace: Keyspace name
-            thread_id_type: Type for thread_id column ("text", "uuid")
-            checkpoint_id_type: Type for checkpoint_id column ("text", "uuid")
+            thread_id_type: Type for thread_id column ("text" [default], "uuid")
+            checkpoint_id_type: Type for checkpoint_id column ("uuid" [default], "text")
             replication_factor: Replication factor for the keyspace (default: 3, use 1 for single-node clusters)
         """
         self.session = session

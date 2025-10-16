@@ -117,8 +117,8 @@ Stores checkpoint data with the following schema:
 CREATE TABLE checkpoints (
     thread_id TEXT,
     checkpoint_ns TEXT,
-    checkpoint_id TEXT,
-    parent_checkpoint_id TEXT,
+    checkpoint_id UUID,
+    parent_checkpoint_id UUID,
     type TEXT,
     checkpoint BLOB,
     metadata BLOB,
@@ -132,7 +132,7 @@ Stores pending writes for checkpoints:
 CREATE TABLE checkpoint_writes (
     thread_id TEXT,
     checkpoint_ns TEXT,
-    checkpoint_id TEXT,
+    checkpoint_id UUID,
     task_id TEXT,
     task_path TEXT,
     idx INT,
@@ -312,15 +312,17 @@ checkpointer = CassandraSaver(session, thread_id_type="text")
 checkpointer = CassandraSaver(session, thread_id_type="uuid")
 ```
 
-```python
-# Use TEXT (default, most flexible)
-checkpointer = CassandraSaver(session, checkpoint_id_type="text")
+Choose the data type for checkpoint identifiers:
 
-# Use UUID (enforces UUID format)
+```python
+# Use UUID (default, more efficient storage and queries)
 checkpointer = CassandraSaver(session, checkpoint_id_type="uuid")
+
+# Use TEXT (stores UUIDv6 as text, useful for compatibility)
+checkpointer = CassandraSaver(session, checkpoint_id_type="text")
 ```
 
-**Note:** Checkpoint IDs are always generated as UUIDv6, the type only affects storage format.
+**Note:** Checkpoint IDs are always generated as UUIDv6. The `checkpoint_id_type` parameter only affects the storage format in Cassandra (native UUID vs TEXT column).
 
 ### Managing Conversations
 

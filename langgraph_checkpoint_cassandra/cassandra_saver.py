@@ -144,7 +144,7 @@ class CassandraSaver(BaseCheckpointSaver):
         *,
         serde: Any | None = None,
         thread_id_type: Literal["text", "uuid"] = "text",
-        checkpoint_id_type: Literal["text", "uuid"] = "text",
+        checkpoint_id_type: Literal["text", "uuid"] = "uuid",
         ttl_seconds: int | None = None,
         read_consistency: ConsistencyLevel | None = ConsistencyLevel.LOCAL_QUORUM,
         write_consistency: ConsistencyLevel | None = ConsistencyLevel.LOCAL_QUORUM,
@@ -158,8 +158,8 @@ class CassandraSaver(BaseCheckpointSaver):
             session: Cassandra session object
             keyspace: Keyspace name for checkpoint tables
             serde: Optional custom serializer (uses JsonPlusSerializer by default)
-            thread_id_type: Type to use for thread_id column: "text" (default), "uuid", or "timeuuid"
-            checkpoint_id_type: Type to use for checkpoint_id column: "text" (default), "uuid"
+            thread_id_type: Type to use for thread_id column: "text" (default) or "uuid"
+            checkpoint_id_type: Type to use for checkpoint_id column: "uuid" (default) or "text"
             ttl_seconds: Optional TTL in seconds for automatic expiration of checkpoints (e.g., 2592000 for 30 days)
             read_consistency: Consistency level for read operations (default: ConsistencyLevel.LOCAL_QUORUM).
                             Set to None to use session default.

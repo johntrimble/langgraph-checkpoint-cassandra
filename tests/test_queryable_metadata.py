@@ -27,6 +27,7 @@ def saver_with_queryable_metadata(cluster):
         session,
         keyspace=keyspace,
         queryable_metadata={"user_id": str, "step": int, "source": str},
+        checkpoint_id_type="text",
     )
 
     # Setup schema
@@ -226,7 +227,7 @@ def test_saver_without_queryable_metadata(cluster, sample_checkpoint):
     keyspace = f"test_no_queryable_{int(time.time())}"
 
     # Create saver WITHOUT queryable metadata
-    saver = CassandraSaver(session, keyspace=keyspace)
+    saver = CassandraSaver(session, keyspace=keyspace, checkpoint_id_type="text")
     saver.setup(replication_factor=1)
 
     try:

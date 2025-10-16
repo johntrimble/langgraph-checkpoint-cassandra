@@ -27,6 +27,7 @@ def saver_with_collections(cluster):
         session,
         keyspace=keyspace,
         queryable_metadata={"tags": list, "categories": set, "attributes": dict},
+        checkpoint_id_type="text",
     )
 
     # Setup schema
@@ -183,6 +184,7 @@ def test_indexed_metadata_parameter(cluster, sample_checkpoint):
             "tags": list,
         },
         indexed_metadata=["user_id"],  # Only index user_id
+        checkpoint_id_type="text",
     )
 
     try:
@@ -241,6 +243,7 @@ def test_empty_indexed_metadata(cluster, sample_checkpoint):
         keyspace=keyspace,
         queryable_metadata={"user_id": str, "step": int},
         indexed_metadata=[],  # No indexes at all
+        checkpoint_id_type="text",
     )
 
     try:

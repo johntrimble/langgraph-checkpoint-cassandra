@@ -34,7 +34,7 @@ def cassandra_session():
 @pytest.fixture
 def saver_with_ttl(cassandra_session):
     """Create a CassandraSaver with TTL enabled (5 seconds for testing)."""
-    saver = CassandraSaver(cassandra_session, keyspace=TEST_KEYSPACE, ttl_seconds=5)
+    saver = CassandraSaver(cassandra_session, keyspace=TEST_KEYSPACE, ttl_seconds=5, checkpoint_id_type="text")
     saver.setup(replication_factor=1)  # Create schema
     return saver
 
@@ -42,7 +42,7 @@ def saver_with_ttl(cassandra_session):
 @pytest.fixture
 def saver_without_ttl(cassandra_session):
     """Create a CassandraSaver without TTL."""
-    saver = CassandraSaver(cassandra_session, keyspace=TEST_KEYSPACE)
+    saver = CassandraSaver(cassandra_session, keyspace=TEST_KEYSPACE, checkpoint_id_type="text")
     saver.setup(replication_factor=1)  # Create schema
     return saver
 

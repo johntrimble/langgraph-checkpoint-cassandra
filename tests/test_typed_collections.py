@@ -39,6 +39,7 @@ def test_list_int_metadata(cluster, sample_checkpoint):
         session,
         keyspace=keyspace,
         queryable_metadata={"scores": list[int]},
+        checkpoint_id_type="text",
     )
 
     try:
@@ -83,6 +84,7 @@ def test_set_str_metadata(cluster, sample_checkpoint):
         session,
         keyspace=keyspace,
         queryable_metadata={"tags": set[str]},
+        checkpoint_id_type="text",
     )
 
     try:
@@ -126,6 +128,7 @@ def test_dict_str_int_metadata(cluster, sample_checkpoint):
         session,
         keyspace=keyspace,
         queryable_metadata={"counters": dict[str, int]},
+        checkpoint_id_type="text",
     )
 
     try:
@@ -176,6 +179,7 @@ def test_dict_str_str_metadata(cluster, sample_checkpoint):
         session,
         keyspace=keyspace,
         queryable_metadata={"labels": dict[str, str]},
+        checkpoint_id_type="text",
     )
 
     try:
@@ -227,6 +231,7 @@ def test_list_float_metadata(cluster, sample_checkpoint):
         session,
         keyspace=keyspace,
         queryable_metadata={"measurements": list[float]},
+        checkpoint_id_type="text",
     )
 
     try:
@@ -275,6 +280,7 @@ def test_mixed_typed_collections(cluster, sample_checkpoint):
             "attributes": dict[str, int],
             "priorities": list[float],
         },
+        checkpoint_id_type="text",
     )
 
     try:
