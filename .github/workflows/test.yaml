@@ -22,7 +22,13 @@ jobs:
 
     - name: Build dev container with cache
       run: |
-        docker buildx bake -f compose.yaml --set dev.cache-from=type=gha,scope=test-${{ github.ref_name }} --set dev.cache-to=type=gha,mode=max,scope=test-${{ github.ref_name }} --load dev
+        echo "Cache scope: test-${{ github.ref_name }}"
+        docker buildx bake -f docker-bake.hcl \
+          --set dev.cache-from=type=gha,scope=test-${{ github.ref_name }} \
+          --set dev.cache-to=type=gha,mode=max,scope=test-${{ github.ref_name }} \
+          --set dev.tags=langgraph-checkpoint-cassandra-dev \
+          --load \
+          --progress=plain dev
 
     - name: Run tests in dev container
       run: |
