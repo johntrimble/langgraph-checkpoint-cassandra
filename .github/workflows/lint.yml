@@ -15,6 +15,10 @@ jobs:
 
     - name: Bootstrap
       run: |
+        # Echo out user name and GID UID for debugging
+        echo "Current user: $(whoami), UID: $(id -u), GID: $(id -g)"
+        # Show permissions of the data directory
+        ls -ld data
         ./script/bootstrap
 
     - name: Check formatting with ruff
