@@ -117,8 +117,8 @@ Stores checkpoint data with the following schema:
 CREATE TABLE checkpoints (
     thread_id TEXT,
     checkpoint_ns TEXT,
-    checkpoint_id UUID,
-    parent_checkpoint_id UUID,
+    checkpoint_id UUID,         -- Always UUIDv6
+    parent_checkpoint_id UUID,  -- Always UUIDv6
     type TEXT,
     checkpoint BLOB,
     metadata BLOB,
@@ -132,7 +132,7 @@ Stores pending writes for checkpoints:
 CREATE TABLE checkpoint_writes (
     thread_id TEXT,
     checkpoint_ns TEXT,
-    checkpoint_id UUID,
+    checkpoint_id UUID,         -- Always UUIDv6
     task_id TEXT,
     task_path TEXT,
     idx INT,
