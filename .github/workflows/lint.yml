@@ -15,11 +15,7 @@ jobs:
 
     - name: Bootstrap
       run: |
-        echo $PWD
-        mkdir -p data/.cache
-        ls -La .
         ./script/bootstrap
-        cat .env
 
     - name: Check formatting with ruff
       run: |

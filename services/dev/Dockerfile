@@ -123,8 +123,8 @@ COPY --from=builder --chown=${USERNAME}:${USERNAME} /opt/venv /opt/venv
 COPY --from=builder --chown=${USERNAME}:${USERNAME} /opt/uv-bin /opt/uv-bin
 COPY --from=builder --chown=${USERNAME}:${USERNAME} /opt/uv-cache /opt/uv-cache
 
-# Create /workspace directory
-RUN mkdir -p /workspace && chown $USERNAME:$USERNAME /workspace
+# Create /workspace and /data directories
+RUN mkdir -p /workspace /data && chown $USERNAME:$USERNAME /workspace /data
 
 USER root
 # Add ENTRYPOINT script
