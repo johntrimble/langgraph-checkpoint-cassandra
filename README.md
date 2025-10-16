@@ -324,21 +324,6 @@ checkpointer = CassandraSaver(session, checkpoint_id_type="text")
 
 **Note:** Checkpoint IDs are always generated as UUIDv6. The `checkpoint_id_type` parameter only affects the storage format in Cassandra (native UUID vs TEXT column).
 
-### Managing Conversations
-
-```python
-# List checkpoints for a thread
-config = {"configurable": {"thread_id": "user-123"}}
-checkpoints = list(checkpointer.list(config, limit=10))
-
-for checkpoint_tuple in checkpoints:
-    print(f"Checkpoint ID: {checkpoint_tuple.checkpoint['id']}")
-    print(f"State: {checkpoint_tuple.checkpoint['channel_values']}")
-
-# Delete a conversation thread
-checkpointer.delete_thread("user-123")
-```
-
 ## Development
 
 See [DEVELOPMENT.md](DEVELOPMENT.md) for information on setting up a development environment, running tests, and contributing.
