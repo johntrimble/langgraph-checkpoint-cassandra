@@ -102,18 +102,7 @@ import asyncio
 asyncio.run(main())
 ```
 
-**When to use async:**
-- Web servers handling many concurrent requests (FastAPI, aiohttp, etc.)
-- Applications with 100s-1000s of concurrent checkpoint operations
-- Scenarios requiring maximum I/O throughput
-
-**When to use sync:**
-- Single-threaded applications
-- Sequential checkpoint operations
-- Simpler code without async/await complexity
-- Most typical LangGraph use cases
-
-**Note:** Async operations require the `cassandra-asyncio-driver` package. Install with:
+**Note:** Async operations require the [cassandra-asyncio-driver](https://github.com/U-238/cassandra-asyncio-driver) package. Install with:
 ```bash
 pip install cassandra-asyncio-driver
 ```
@@ -166,11 +155,11 @@ checkpointer = CassandraSaver(
     session,
     keyspace='my_checkpoints',
     queryable_metadata={
-        "user_id": str,      # Text field for user IDs
-        "step": int,         # Integer field for step numbers
-        "source": str,       # Text field for source tracking
-        "tags": list,        # List of tags
-        "attributes": dict,  # Key-value attributes
+        "user_id": str,               # Text field for user IDs
+        "step": int,                  # Integer field for step numbers
+        "source": str,                # Text field for source tracking
+        "tags": list[str],            # List of string tags
+        "attributes": dict[str, str], # Key-value attributes
     },
     indexed_metadata=["user_id", "source"]  # Only index these fields (optional)
 )
@@ -227,37 +216,47 @@ mixed = list(checkpointer.list(
 - `int` - Integer values
 - `float` - Floating point values
 - `bool` - Boolean values
-- `dict` or `dict[str, T]` - Dictionary/map values (supports key-value and value-only filtering)
-  - Examples: `dict`, `dict[str, int]`, `dict[str, str]`
-- `list` or `list[T]` - List values (supports CONTAINS operator)
-  - Examples: `list`, `list[int]`, `list[str]`, `list[float]`
-- `set` or `set[T]` - Set values (supports CONTAINS operator)
-  - Examples: `set`, `set[str]`, `set[int]`
+- `dict[K, V]` - Dictionary/map values (supports key-value and value-only filtering)
+  - Examples: `dict[str, int]`, `dict[str, str]`, `dict[str, bool]`
+- `list[T]` - List values (supports CONTAINS operator)
+  - Examples: `list[int]`, `list[str]`, `list[float]`
+- `set[T]` - Set values (supports CONTAINS operator)
+  - Examples: `set[str]`, `set[int]`, `set[float]`
 
-**Performance optimization with `indexed_metadata`:**
-- By default, all `queryable_metadata` fields get SAI indexes for maximum performance
-- Use `indexed_metadata` to specify a subset of fields to index (reduces storage overhead)
-- Non-indexed queryable fields still work but use `ALLOW FILTERING` (slightly slower)
-- This allows you to make many fields queryable while only indexing the most frequently filtered ones
 
-**Benefits:**
-- **Much faster filtering** when you have many checkpoints per thread
-- **Reduced network traffic** - only matching checkpoints are returned
-- **Scalable** - performance doesn't degrade with large checkpoint counts
-- **Flexible** - balance between query performance and storage overhead
+**Index management with `indexed_metadata`:**
 
-**When to use:**
-- Multi-tenant applications (filter by `user_id` or `tenant_id`)
-- Debugging (filter by `source` to find input vs loop checkpoints)
-- Step-based filtering (filter by `step` number)
-- Tag-based organization (filter by tags in a list)
-- Environment/configuration filtering (filter by key-value attributes)
+By default, **all queryable metadata fields get SAI indexes** for maximum query performance:
+```python
+checkpointer = CassandraSaver(
+    session,
+    queryable_metadata={
+        "user_id": str,
+        "source": str,
+        "step": int,
+    }
+    # All three fields will be indexed (default behavior)
+)
+```
 
-**Important notes:**
-- Queryable fields must be specified before calling `setup()`
-- Adding new queryable fields requires calling `setup()` again
-- Non-queryable metadata fields can still be filtered, but client-side (slower)
-- Collection types (list, set, dict) support CONTAINS operator for efficient membership testing
+To reduce storage overhead, use `indexed_metadata` to index only frequently-queried fields:
+```python
+checkpointer = CassandraSaver(
+    session,
+    queryable_metadata={
+        "user_id": str,      # Will be indexed (in indexed_metadata)
+        "source": str,       # Will be indexed (in indexed_metadata)
+        "step": int,         # NOT indexed (queryable but slower)
+        "debug_info": str,   # NOT indexed (queryable but slower)
+    },
+    indexed_metadata=["user_id", "source"]  # Only index these two
+)
+```
+
+- **Indexed fields**: Fast queries using SAI index
+- **Non-indexed queryable fields**: Still filterable server-side, but uses `ALLOW FILTERING` (slower)
+- This allows many fields to be queryable while only indexing the most important ones
+
 
 ### TTL (Time To Live)
 
@@ -290,15 +289,6 @@ checkpointer = CassandraSaver(
 
 # Default: Balanced consistency (LOCAL_QUORUM)
 checkpointer = CassandraSaver(session, keyspace='my_checkpoints')
-# Uses ConsistencyLevel.LOCAL_QUORUM for both reads and writes
-
-# Development: Fast, eventual consistency
-checkpointer = CassandraSaver(
-    session,
-    keyspace='my_checkpoints',
-    read_consistency=ConsistencyLevel.ONE,         # Fastest reads
-    write_consistency=ConsistencyLevel.ONE         # Fastest writes
-)
 
 # Use session default (set read_consistency=None, write_consistency=None)
 session.default_consistency_level = ConsistencyLevel.ALL
@@ -310,16 +300,7 @@ checkpointer = CassandraSaver(
 )
 ```
 
-**Available consistency levels:**
-- `ConsistencyLevel.ONE`, `TWO`, `THREE` - Specific number of replicas
-- `ConsistencyLevel.QUORUM` - Majority of replicas (most common)
-- `ConsistencyLevel.ALL` - All replicas (strongest consistency, slowest)
-- `ConsistencyLevel.LOCAL_QUORUM` - Majority in local datacenter (default, recommended)
-- `ConsistencyLevel.EACH_QUORUM` - Majority in each datacenter
-- `ConsistencyLevel.LOCAL_ONE` - One replica in local datacenter
-- `ConsistencyLevel.ANY` - At least one node (write only, weakest consistency)
-
-### Thread ID Types
+### Thread ID and Checkpoint ID Types
 
 Choose the data type for thread identifiers:
 
@@ -330,6 +311,16 @@ checkpointer = CassandraSaver(session, thread_id_type="text")
 # Use UUID (enforces UUID format)
 checkpointer = CassandraSaver(session, thread_id_type="uuid")
 ```
+
+```python
+# Use TEXT (default, most flexible)
+checkpointer = CassandraSaver(session, checkpoint_id_type="text")
+
+# Use UUID (enforces UUID format)
+checkpointer = CassandraSaver(session, checkpoint_id_type="uuid")
+```
+
+**Note:** Checkpoint IDs are always generated as UUIDv6, the type only affects storage format.
 
 ### Managing Conversations
 
