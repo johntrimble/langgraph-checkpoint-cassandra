@@ -13,17 +13,26 @@ jobs:
     steps:
     - uses: actions/checkout@v4
 
+    - name: Set up Docker Buildx
+      uses: docker/setup-buildx-action@v3
+
     - name: Bootstrap
       run: |
         ./script/bootstrap
 
+    - name: Build dev container with cache
+      run: |
+        docker compose build dev
+      env:
+        BUILDX_CACHE_SCOPE: lint-${{ github.ref_name }}
+
     - name: Check formatting with ruff
       run: |
-        docker compose run --rm dev ruff format --check .
+        docker compose run --rm --no-deps dev ruff format --check .
 
     - name: Lint with ruff
       run: |
-        docker compose run --rm dev ruff check .
+        docker compose run --rm --no-deps dev ruff check .
 
     - name: Cleanup
       if: always()
