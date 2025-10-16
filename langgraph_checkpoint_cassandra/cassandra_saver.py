@@ -8,7 +8,7 @@ in Apache Cassandra, following the Option 4+ design (two-table enhanced approach
 import logging
 from collections.abc import AsyncIterator, Iterator, Sequence
 from contextlib import contextmanager
-from typing import Any, Literal
+from typing import Any, Literal, get_args, get_origin
 from uuid import UUID
 
 from cassandra.cluster import Cluster, Session
@@ -28,14 +28,98 @@ from langgraph.checkpoint.base import (
     get_checkpoint_id,
 )
 
-from .cassandra_base import _python_type_to_cql_type
-
 logger = logging.getLogger(__name__)
 
 # Constants
 DEFAULT_KEYSPACE = "langgraph_checkpoints"
 DEFAULT_CONTACT_POINTS = ["localhost"]
 DEFAULT_PORT = 9042
+
+
+def _python_type_to_cql_type(python_type: type) -> str:
+    """
+    Convert Python type to Cassandra CQL type string.
+
+    Supports nested collections like list[int], dict[str, int], set[str], etc.
+
+    Args:
+        python_type: Python type (str, int, float, bool, dict, list, set, or parameterized versions)
+
+    Returns:
+        CQL type string
+
+    Raises:
+        ValueError: If type is not supported
+
+    Examples:
+        >>> _python_type_to_cql_type(str)
+        'TEXT'
+        >>> _python_type_to_cql_type(int)
+        'BIGINT'
+        >>> _python_type_to_cql_type(list[int])
+        'LIST<BIGINT>'
+        >>> _python_type_to_cql_type(dict[str, int])
+        'MAP<TEXT, BIGINT>'
+        >>> _python_type_to_cql_type(set[str])
+        'SET<TEXT>'
+    """
+    type_mapping = {
+        str: "TEXT",
+        int: "BIGINT",
+        float: "DOUBLE",
+        bool: "BOOLEAN",
+    }
+
+    # Check simple types first
+    if python_type in type_mapping:
+        return type_mapping[python_type]
+
+    # Handle parameterized collection types (e.g., list[int], dict[str, int])
+    origin = get_origin(python_type)
+    if origin is not None:
+        args = get_args(python_type)
+
+        if origin is list:
+            if args:
+                # list[T] -> LIST<cql_type(T)>
+                inner_type = _python_type_to_cql_type(args[0])
+                return f"LIST<{inner_type}>"
+            else:
+                # Unparameterized list -> LIST<TEXT>
+                return "LIST<TEXT>"
+
+        elif origin is set:
+            if args:
+                # set[T] -> SET<cql_type(T)>
+                inner_type = _python_type_to_cql_type(args[0])
+                return f"SET<{inner_type}>"
+            else:
+                # Unparameterized set -> SET<TEXT>
+                return "SET<TEXT>"
+
+        elif origin is dict:
+            if args and len(args) >= 2:
+                # dict[K, V] -> MAP<cql_type(K), cql_type(V)>
+                key_type = _python_type_to_cql_type(args[0])
+                value_type = _python_type_to_cql_type(args[1])
+                return f"MAP<{key_type}, {value_type}>"
+            else:
+                # Unparameterized dict -> MAP<TEXT, TEXT>
+                return "MAP<TEXT, TEXT>"
+
+    # Fallback for unparameterized dict, list, set
+    if python_type is dict:
+        return "MAP<TEXT, TEXT>"
+    elif python_type is list:
+        return "LIST<TEXT>"
+    elif python_type is set:
+        return "SET<TEXT>"
+
+    raise ValueError(
+        f"Unsupported type: {python_type}. "
+        f"Supported types are: str, int, float, bool, dict, list, set, "
+        f"and parameterized versions like list[int], dict[str, int], set[str]"
+    )
 
 
 class CassandraSaver(BaseCheckpointSaver):
@@ -116,13 +200,6 @@ class CassandraSaver(BaseCheckpointSaver):
                 )
 
         self._statements_prepared = False
-
-        # # Try to prepare statements if keyspace exists
-        # try:
-        #     self._prepare_statements()
-        # except Exception:
-        #     # Keyspace might not exist yet - will prepare on first use
-        #     pass
 
     def _prepare_statements(self) -> None:
         """Prepare CQL statements for reuse."""
