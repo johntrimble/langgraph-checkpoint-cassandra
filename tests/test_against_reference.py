@@ -172,18 +172,15 @@ def metadata_dicts(draw):
     metadata["score"] = draw(
         st.one_of(
             st.none(),
-            st.floats(min_value=0.0, max_value=10.0, allow_nan=False, allow_infinity=False)
+            st.floats(
+                min_value=0.0, max_value=10.0, allow_nan=False, allow_infinity=False
+            ),
         )
     )
 
     # tags: list of strings from small pool
     metadata["tags"] = draw(
-        st.lists(
-            st.sampled_from(["test", "prod"]),
-            min_size=0,
-            max_size=3,
-            unique=True
-        )
+        st.lists(st.sampled_from(["test", "prod"]), min_size=0, max_size=3, unique=True)
     )
 
     return metadata
@@ -217,7 +214,7 @@ def metadata_filters(draw):
             st.sampled_from(available_fields),
             min_size=num_fields,
             max_size=num_fields,
-            unique=True
+            unique=True,
         )
     )
 
@@ -231,7 +228,9 @@ def metadata_filters(draw):
             # NULL filtering with = operator (would need IS NULL syntax)
             # Only use non-None float values for now
             filter_dict["score"] = draw(
-                st.floats(min_value=0.0, max_value=10.0, allow_nan=False, allow_infinity=False)
+                st.floats(
+                    min_value=0.0, max_value=10.0, allow_nan=False, allow_infinity=False
+                )
             )
         elif field == "source":
             filter_dict["source"] = draw(st.sampled_from(["input", "loop", "update"]))
@@ -291,11 +290,11 @@ def operation_sequences(draw, min_size=None, max_size=None):
     # Define weighted operation types (same weights as before)
     # Total: 100 items for easy percentage calculation
     operation_pool = (
-        ["put"] * 70 +           # 70% - PutOperation
-        ["list"] * 10 +          # 10% - ListOperation
-        ["get"] * 7 +            # 7%  - GetOperation
-        ["put_writes"] * 10 +    # 10% - PutWritesOperation
-        ["delete"] * 3           # 3%  - DeleteThreadOperation
+        ["put"] * 70  # 70% - PutOperation
+        + ["list"] * 10  # 10% - ListOperation
+        + ["get"] * 7  # 7%  - GetOperation
+        + ["put_writes"] * 10  # 10% - PutWritesOperation
+        + ["delete"] * 3  # 3%  - DeleteThreadOperation
     )
 
     operations = []
@@ -305,43 +304,53 @@ def operation_sequences(draw, min_size=None, max_size=None):
 
         # Build the appropriate operation based on type
         if op_type == "put":
-            op = draw(st.builds(
-                PutOperation,
-                thread_id=thread_ids(),
-                checkpoint_ns=checkpoint_namespaces(),
-                checkpoint=checkpoints(),
-                metadata=metadata_dicts(),
-            ))
+            op = draw(
+                st.builds(
+                    PutOperation,
+                    thread_id=thread_ids(),
+                    checkpoint_ns=checkpoint_namespaces(),
+                    checkpoint=checkpoints(),
+                    metadata=metadata_dicts(),
+                )
+            )
         elif op_type == "list":
-            op = draw(st.builds(
-                ListOperation,
-                thread_id=thread_ids(),
-                checkpoint_ns=checkpoint_namespaces(),
-                limit=st.one_of(st.none(), st.integers(min_value=1, max_value=5)),
-                filter=metadata_filters(),
-            ))
+            op = draw(
+                st.builds(
+                    ListOperation,
+                    thread_id=thread_ids(),
+                    checkpoint_ns=checkpoint_namespaces(),
+                    limit=st.one_of(st.none(), st.integers(min_value=1, max_value=5)),
+                    filter=metadata_filters(),
+                )
+            )
         elif op_type == "get":
-            op = draw(st.builds(
-                GetOperation,
-                thread_id=thread_ids(),
-                checkpoint_ns=checkpoint_namespaces(),
-                checkpoint_id=st.one_of(st.none(), st.just("__will_replace__")),
-                checkpoint_index=st.integers(min_value=0, max_value=100),
-            ))
+            op = draw(
+                st.builds(
+                    GetOperation,
+                    thread_id=thread_ids(),
+                    checkpoint_ns=checkpoint_namespaces(),
+                    checkpoint_id=st.one_of(st.none(), st.just("__will_replace__")),
+                    checkpoint_index=st.integers(min_value=0, max_value=100),
+                )
+            )
         elif op_type == "put_writes":
-            op = draw(st.builds(
-                PutWritesOperation,
-                thread_id=thread_ids(),
-                checkpoint_ns=checkpoint_namespaces(),
-                checkpoint_id=st.just("__will_replace__"),
-                writes=write_sequences(),
-                task_id=st.text(min_size=1, max_size=10, alphabet="abcdef"),
-            ))
+            op = draw(
+                st.builds(
+                    PutWritesOperation,
+                    thread_id=thread_ids(),
+                    checkpoint_ns=checkpoint_namespaces(),
+                    checkpoint_id=st.just("__will_replace__"),
+                    writes=write_sequences(),
+                    task_id=st.text(min_size=1, max_size=10, alphabet="abcdef"),
+                )
+            )
         else:  # delete
-            op = draw(st.builds(
-                DeleteThreadOperation,
-                thread_id=thread_ids(),
-            ))
+            op = draw(
+                st.builds(
+                    DeleteThreadOperation,
+                    thread_id=thread_ids(),
+                )
+            )
 
         operations.append(op)
 
@@ -394,17 +403,13 @@ def savers(clusters):
 
     # Create sync saver and setup schema
     sync_saver = CassandraSaver(
-        sync_session,
-        keyspace=sync_keyspace,
-        queryable_metadata=queryable_metadata
+        sync_session, keyspace=sync_keyspace, queryable_metadata=queryable_metadata
     )
     sync_saver.setup(replication_factor=1)
 
     # Create async saver (with async session) and setup schema
     async_saver = CassandraSaver(
-        async_session,
-        keyspace=async_keyspace,
-        queryable_metadata=queryable_metadata
+        async_session, keyspace=async_keyspace, queryable_metadata=queryable_metadata
     )
     async_saver.setup(replication_factor=1)
 
@@ -478,9 +483,7 @@ class TestSyncAsyncEquivalence:
             HealthCheck.data_too_large,
         ],
     )
-    @given(
-        operations=operation_sequences(min_size=100)
-    )
+    @given(operations=operation_sequences(min_size=100))
     def test_operation_sequences_produce_identical_results(self, savers, operations):
         """Property: Executing the same sequence of operations should produce identical results."""
         sync_saver, async_saver = savers
