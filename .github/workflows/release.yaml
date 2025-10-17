@@ -11,10 +11,10 @@ jobs:
   release:
     name: Publish to Test PyPI
     runs-on: ubuntu-latest
-    environment:
-      name: testpypi
-    permissions:
-      id-token: write
+    # environment:
+    #   name: testpypi
+    # permissions:
+    #   id-token: write
     steps:
       - name: Set up Python 3.12
         uses: actions/setup-python@v5
@@ -35,5 +35,5 @@ jobs:
       - name: List dist files
         run: ls -la dist/
 
-      - name: Publish
-        run: uv publish --index testpypi
+      # - name: Publish
+      #   run: uv publish --index testpypi
