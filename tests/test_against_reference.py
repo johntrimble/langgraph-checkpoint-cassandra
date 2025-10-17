@@ -1,8 +1,6 @@
 """
-Property-based tests using Hypothesis to verify async and sync implementations behave identically.
-
-These tests use stateful property-based testing to verify that CassandraSaver with sync and async sessions
-produce identical results for the same sequences of operations.
+Property-based tests using Hypothesis to verify async and sync methods produce
+identical results as the InMemorySaver.
 """
 
 import asyncio
@@ -69,6 +67,7 @@ class ListOperation:
     thread_id: str
     checkpoint_ns: str
     limit: int | None
+    filter: dict[str, Any] | None
 
 
 @dataclass
@@ -150,18 +149,95 @@ def checkpoints(draw):
 
 @st.composite
 def metadata_dicts(draw):
-    """Generate metadata dictionaries with ASCII-safe characters."""
-    return CheckpointMetadata(
-        source=draw(
-            st.text(
-                alphabet=st.characters(min_codepoint=32, max_codepoint=126),
-                min_size=1,
-                max_size=10,
-            )
-        ),
-        step=draw(st.integers(min_value=0, max_value=100)),
+    """Generate metadata dictionaries with ASCII-safe characters.
+
+    Includes both standard CheckpointMetadata fields (source, step, parents)
+    and custom queryable fields (user_id, step_num, score, tags) drawn from
+    small value pools to encourage overlap with filter expressions.
+    """
+    metadata = CheckpointMetadata(
+        source=draw(st.sampled_from(["input", "loop", "update"])),
+        step=draw(st.integers(min_value=0, max_value=3)),
         parents={},
     )
+
+    # Add custom queryable fields with small value pools for overlap
+    # user_id: string from small pool
+    metadata["user_id"] = draw(st.sampled_from(["user1", "user2"]))
+
+    # step_num: integer from small range
+    metadata["step_num"] = draw(st.integers(min_value=0, max_value=2))
+
+    # score: float from small range (with some None values)
+    metadata["score"] = draw(
+        st.one_of(
+            st.none(),
+            st.floats(
+                min_value=0.0, max_value=10.0, allow_nan=False, allow_infinity=False
+            ),
+        )
+    )
+
+    # tags: list of strings from small pool
+    metadata["tags"] = draw(
+        st.lists(st.sampled_from(["test", "prod"]), min_size=0, max_size=3, unique=True)
+    )
+
+    return metadata
+
+
+@st.composite
+def metadata_filters(draw):
+    """Generate filter dictionaries that match metadata structure.
+
+    Generates filters using the same value pools as metadata_dicts() to ensure
+    high probability of matches. Returns None ~50% of the time (no filter),
+    otherwise returns a filter dict with 1-3 fields.
+    """
+    # 50% chance of no filter (to ensure list operations return more results)
+    if draw(st.booleans()):
+        return None
+
+    filter_dict = {}
+
+    # Decide how many filter fields to include (1-3)
+    num_fields = draw(st.integers(min_value=1, max_value=3))
+
+    # Available filter fields (matching queryable metadata fields)
+    # Note: Excluding 'tags' because InMemorySaver doesn't support CONTAINS semantics
+    # for lists - it does exact equality matching only
+    available_fields = ["user_id", "step_num", "score", "source", "step"]
+
+    # Randomly select fields to filter on
+    selected_fields = draw(
+        st.lists(
+            st.sampled_from(available_fields),
+            min_size=num_fields,
+            max_size=num_fields,
+            unique=True,
+        )
+    )
+
+    for field in selected_fields:
+        if field == "user_id":
+            filter_dict["user_id"] = draw(st.sampled_from(["user1", "user2", "user3"]))
+        elif field == "step_num":
+            filter_dict["step_num"] = draw(st.integers(min_value=0, max_value=5))
+        elif field == "score":
+            # Note: Avoid None in filters for queryable fields as Cassandra doesn't support
+            # NULL filtering with = operator (would need IS NULL syntax)
+            # Only use non-None float values for now
+            filter_dict["score"] = draw(
+                st.floats(
+                    min_value=0.0, max_value=10.0, allow_nan=False, allow_infinity=False
+                )
+            )
+        elif field == "source":
+            filter_dict["source"] = draw(st.sampled_from(["input", "loop", "update"]))
+        elif field == "step":
+            filter_dict["step"] = draw(st.integers(min_value=0, max_value=10))
+
+    return filter_dict
 
 
 @st.composite
@@ -190,6 +266,95 @@ def write_sequences(draw):
         writes.append((channel, value))
 
     return writes
+
+
+@st.composite
+def operation_sequences(draw, min_size=None, max_size=None):
+    """
+    Generate sequences of operations with explicit size control.
+
+    Unlike st.lists() which has exponential bias toward min_size, this strategy
+    draws the size explicitly first, giving better distribution across the range.
+
+    This allows:
+    - Large examples during generation (well-distributed 100-1000 ops)
+    - Small minimal examples when shrinking (down to min_size on failure)
+
+    The size is drawn as an integer, which Hypothesis can shrink independently
+    of the operations themselves.
+    """
+    # Draw the number of operations
+    # Simple approach: just use the full range, Hypothesis will handle it
+    num_ops = draw(st.integers(min_value=min_size, max_value=max_size))
+
+    # Define weighted operation types (same weights as before)
+    # Total: 100 items for easy percentage calculation
+    operation_pool = (
+        ["put"] * 70  # 70% - PutOperation
+        + ["list"] * 10  # 10% - ListOperation
+        + ["get"] * 7  # 7%  - GetOperation
+        + ["put_writes"] * 10  # 10% - PutWritesOperation
+        + ["delete"] * 3  # 3%  - DeleteThreadOperation
+    )
+
+    operations = []
+    for _ in range(num_ops):
+        # Draw operation type from weighted pool
+        op_type = draw(st.sampled_from(operation_pool))
+
+        # Build the appropriate operation based on type
+        if op_type == "put":
+            op = draw(
+                st.builds(
+                    PutOperation,
+                    thread_id=thread_ids(),
+                    checkpoint_ns=checkpoint_namespaces(),
+                    checkpoint=checkpoints(),
+                    metadata=metadata_dicts(),
+                )
+            )
+        elif op_type == "list":
+            op = draw(
+                st.builds(
+                    ListOperation,
+                    thread_id=thread_ids(),
+                    checkpoint_ns=checkpoint_namespaces(),
+                    limit=st.one_of(st.none(), st.integers(min_value=1, max_value=5)),
+                    filter=metadata_filters(),
+                )
+            )
+        elif op_type == "get":
+            op = draw(
+                st.builds(
+                    GetOperation,
+                    thread_id=thread_ids(),
+                    checkpoint_ns=checkpoint_namespaces(),
+                    checkpoint_id=st.one_of(st.none(), st.just("__will_replace__")),
+                    checkpoint_index=st.integers(min_value=0, max_value=100),
+                )
+            )
+        elif op_type == "put_writes":
+            op = draw(
+                st.builds(
+                    PutWritesOperation,
+                    thread_id=thread_ids(),
+                    checkpoint_ns=checkpoint_namespaces(),
+                    checkpoint_id=st.just("__will_replace__"),
+                    writes=write_sequences(),
+                    task_id=st.text(min_size=1, max_size=10, alphabet="abcdef"),
+                )
+            )
+        else:  # delete
+            op = draw(
+                st.builds(
+                    DeleteThreadOperation,
+                    thread_id=thread_ids(),
+                )
+            )
+
+        operations.append(op)
+
+    return operations
 
 
 # Fixtures
@@ -228,12 +393,24 @@ def savers(clusters):
     # Cleanup any existing keyspaces from previous runs FIRST
     cleanup_keyspaces(sync_session, [sync_keyspace, async_keyspace])
 
+    # Configure queryable metadata fields to match our filter generation strategy
+    # Note: tags is excluded because InMemorySaver doesn't support CONTAINS semantics
+    queryable_metadata = {
+        "user_id": str,
+        "step_num": int,
+        "score": float,
+    }
+
     # Create sync saver and setup schema
-    sync_saver = CassandraSaver(sync_session, keyspace=sync_keyspace)
+    sync_saver = CassandraSaver(
+        sync_session, keyspace=sync_keyspace, queryable_metadata=queryable_metadata
+    )
     sync_saver.setup(replication_factor=1)
 
     # Create async saver (with async session) and setup schema
-    async_saver = CassandraSaver(async_session, keyspace=async_keyspace)
+    async_saver = CassandraSaver(
+        async_session, keyspace=async_keyspace, queryable_metadata=queryable_metadata
+    )
     async_saver.setup(replication_factor=1)
 
     yield sync_saver, async_saver
@@ -285,8 +462,8 @@ def normalize_checkpoint_tuple(
         return [normalize_checkpoint_tuple(t) for t in checkpoint_tuple]
 
     if checkpoint_tuple.pending_writes:
-        checkpoint_tuple = copy.deepcopy(checkpoint_tuple)
-        checkpoint_tuple._replace(
+        # _replace returns a new namedtuple, it doesn't modify in place
+        checkpoint_tuple = checkpoint_tuple._replace(
             pending_writes=_normalize_pending_writes(checkpoint_tuple.pending_writes)
         )
 
@@ -302,60 +479,11 @@ class TestSyncAsyncEquivalence:
         suppress_health_check=[
             HealthCheck.function_scoped_fixture,
             HealthCheck.too_slow,
+            HealthCheck.large_base_example,
+            HealthCheck.data_too_large,
         ],
     )
-    @given(
-        operations=st.lists(
-            st.one_of(
-                # Put checkpoint
-                st.builds(
-                    PutOperation,
-                    thread_id=thread_ids(),
-                    checkpoint_ns=checkpoint_namespaces(),
-                    checkpoint=checkpoints(),
-                    metadata=metadata_dicts(),
-                ),
-                # Put writes (we'll ensure checkpoint exists)
-                st.builds(
-                    PutWritesOperation,
-                    thread_id=thread_ids(),
-                    checkpoint_ns=checkpoint_namespaces(),
-                    checkpoint_id=st.just("__will_replace__"),
-                    writes=write_sequences(),
-                    task_id=st.text(min_size=1, max_size=10, alphabet="abcdef"),
-                ),
-                # Get checkpoint (50% chance of getting latest, 50% chance of getting specific)
-                st.builds(
-                    GetOperation,
-                    thread_id=thread_ids(),
-                    checkpoint_ns=checkpoint_namespaces(),
-                    checkpoint_id=st.one_of(
-                        st.none(),  # 50% - get latest
-                        st.just(
-                            "__will_replace__"
-                        ),  # 50% - will be replaced with checkpoint at index
-                    ),
-                    checkpoint_index=st.integers(
-                        min_value=0, max_value=100
-                    ),  # Index to pick from history
-                ),
-                # List checkpoints
-                st.builds(
-                    ListOperation,
-                    thread_id=thread_ids(),
-                    checkpoint_ns=checkpoint_namespaces(),
-                    limit=st.one_of(st.none(), st.integers(min_value=1, max_value=5)),
-                ),
-                # Delete thread (lower probability)
-                st.builds(
-                    DeleteThreadOperation,
-                    thread_id=thread_ids(),
-                ),
-            ),
-            min_size=5,
-            max_size=1000,
-        )
-    )
+    @given(operations=operation_sequences(min_size=100))
     def test_operation_sequences_produce_identical_results(self, savers, operations):
         """Property: Executing the same sequence of operations should produce identical results."""
         sync_saver, async_saver = savers
@@ -501,6 +629,8 @@ class TestSyncAsyncEquivalence:
                 kwargs = {}
                 if op.limit is not None:
                     kwargs["limit"] = op.limit
+                if op.filter is not None:
+                    kwargs["filter"] = op.filter
 
                 list_sync = normalize_checkpoint_tuple(
                     sync_saver.list(config, **kwargs)
