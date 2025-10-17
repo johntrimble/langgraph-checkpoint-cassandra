@@ -1,12 +1,5 @@
 """
-Custom schema migration system for Cassandra checkpoint saver.
-
-This module provides a lightweight migration system that:
-- Supports YAML-based migration definitions
-- Tracks applied migrations in the database
-- Prevents concurrent migrations with lightweight locks
-- Ensures locks don't hold indefinitely with TTL
-- Supports both CQL statements and Python functions
+Migration system for Cassandra checkpoint saver.
 """
 
 from __future__ import annotations

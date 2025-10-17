@@ -10,7 +10,6 @@ from dataclasses import dataclass
 from typing import Any, overload
 
 import pytest
-import uuid6
 from cassandra.cluster import Cluster
 from cassandra_asyncio.cluster import Cluster as AsyncCluster
 from hypothesis import HealthCheck, given, settings
@@ -21,6 +20,7 @@ from langgraph.checkpoint.base import (
     CheckpointMetadata,
     CheckpointTuple,
 )
+from langgraph.checkpoint.base.id import uuid6
 from langgraph.checkpoint.memory import InMemorySaver
 
 from langgraph_checkpoint_cassandra import CassandraSaver
@@ -139,7 +139,7 @@ def checkpoints(draw):
 
     return Checkpoint(
         v=1,
-        id=str(uuid6.uuid6()),
+        id=str(uuid6()),
         ts=draw(st.datetimes().map(lambda d: d.isoformat())),
         channel_values=channel_values,
         channel_versions=channel_versions,
@@ -272,16 +272,6 @@ def write_sequences(draw):
 def operation_sequences(draw, min_size=None, max_size=None):
     """
     Generate sequences of operations with explicit size control.
-
-    Unlike st.lists() which has exponential bias toward min_size, this strategy
-    draws the size explicitly first, giving better distribution across the range.
-
-    This allows:
-    - Large examples during generation (well-distributed 100-1000 ops)
-    - Small minimal examples when shrinking (down to min_size on failure)
-
-    The size is drawn as an integer, which Hypothesis can shrink independently
-    of the operations themselves.
     """
     # Draw the number of operations
     # Simple approach: just use the full range, Hypothesis will handle it

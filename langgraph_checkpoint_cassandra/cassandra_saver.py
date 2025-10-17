@@ -1,8 +1,5 @@
 """
 Cassandra-based checkpoint saver implementation for LangGraph.
-
-This module provides a CheckpointSaver implementation that stores checkpoints
-in Apache Cassandra, following the Option 4+ design (two-table enhanced approach).
 """
 
 import logging
