@@ -36,5 +36,5 @@ jobs:
       - name: List dist files
         run: ls -la dist/
 
-      # - name: Publish
-      #   run: uv publish --index testpypi
+      - name: Publish
+        run: uv publish --index testpypi
