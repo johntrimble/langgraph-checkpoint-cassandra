@@ -37,7 +37,6 @@ DEFAULT_MIGRATIONS = {
                     PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id)
                 ) WITH CLUSTERING ORDER BY (checkpoint_ns ASC, checkpoint_id DESC)
                   AND compaction = {{'class': 'UnifiedCompactionStrategy'}}
-                  AND gc_grace_seconds = 864000
             """).strip(),
             textwrap.dedent("""
                 CREATE TABLE IF NOT EXISTS {keyspace}.checkpoint_writes (
@@ -53,7 +52,6 @@ DEFAULT_MIGRATIONS = {
                     PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id, task_id, idx)
                 ) WITH CLUSTERING ORDER BY (checkpoint_ns ASC, checkpoint_id DESC, task_id ASC, idx ASC)
                   AND compaction = {{'class': 'UnifiedCompactionStrategy'}}
-                  AND gc_grace_seconds = 864000
             """).strip(),
         ],
     }

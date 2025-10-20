@@ -59,8 +59,6 @@ cluster.shutdown()
 
 ### Asynchronous Usage
 
-For high-concurrency scenarios (web servers, concurrent operations), use `CassandraSaver` with an async session:
-
 ```python
 from cassandra_asyncio.cluster import Cluster
 from langgraph_checkpoint_cassandra import CassandraSaver
@@ -122,8 +120,8 @@ CREATE TABLE checkpoints (
     type TEXT,
     checkpoint BLOB,
     metadata BLOB,
-    PRIMARY KEY ((thread_id, checkpoint_ns), checkpoint_id)
-) WITH CLUSTERING ORDER BY (checkpoint_id DESC);
+    PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id)
+) WITH CLUSTERING ORDER BY (checkpoint_ns ASC, checkpoint_id DESC)
 ```
 
 ### `checkpoint_writes` table
@@ -139,8 +137,8 @@ CREATE TABLE checkpoint_writes (
     channel TEXT,
     type TEXT,
     value BLOB,
-    PRIMARY KEY ((thread_id, checkpoint_ns, checkpoint_id), task_id, idx)
-);
+    PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id, task_id, idx)
+) WITH CLUSTERING ORDER BY (checkpoint_ns ASC, checkpoint_id DESC, task_id ASC, idx ASC)
 ```
 
 ## Advanced Features
