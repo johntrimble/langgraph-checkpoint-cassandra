@@ -59,8 +59,6 @@ cluster.shutdown()
 
 ### Asynchronous Usage
 
-For high-concurrency scenarios (web servers, concurrent operations), use `CassandraSaver` with an async session:
-
 ```python
 from cassandra_asyncio.cluster import Cluster
 from langgraph_checkpoint_cassandra import CassandraSaver
