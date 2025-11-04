@@ -24,6 +24,7 @@ from langgraph.checkpoint.base import (
     CheckpointTuple,
     get_checkpoint_id,
 )
+from langgraph_checkpoint_cassandra.migrations import MigrationManager
 
 logger = logging.getLogger(__name__)
 
@@ -383,23 +384,10 @@ class CassandraSaver(BaseCheckpointSaver):
             checkpointer.setup(replication_factor=1)
             ```
         """
-        from langgraph_checkpoint_cassandra.migrations import MigrationManager
-
-        logger.info("Setting up checkpoint schema...")
-        manager = MigrationManager(
-            session=self.session,
-            keyspace=self.keyspace,
-            thread_id_type=self.thread_id_type,
-            checkpoint_id_type=self.checkpoint_id_type,
-            replication_factor=replication_factor,
+        mm = MigrationManager(
+            self.session, self.keyspace, replication_factor=replication_factor, thread_id_type=self.thread_id_type, checkpoint_id_type=self.checkpoint_id_type
         )
-
-        # Apply any pending migrations
-        count = manager.migrate()
-        if count > 0:
-            logger.info(f"✓ Applied {count} migration(s)")
-        else:
-            logger.info("✓ Schema is up to date")
+        mm.migrate()
 
         # Add queryable metadata columns and indexes if specified
         if self.queryable_metadata:
