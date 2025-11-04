@@ -41,6 +41,8 @@ services:
     - .:/workspace:cached
     # Persist data across container restarts (models, cache, etc)
     - ./data:/data:cached
+    # Persist general cache data
+    - cache_data:/home/vscode/.cache:cached
     # Persist claude config
     - claude_data:/home/vscode/.claude:cached
     # Persist bash history
@@ -86,5 +88,6 @@ services:
 
 volumes:
   claude_data:
+  cache_data:
   cassandra_data:
   commandhistory:
