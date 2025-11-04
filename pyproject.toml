@@ -60,13 +60,12 @@ show_error_codes = true
 pretty = true
 namespace_packages = true
 files = [
-    "chainlit_cassandra_data_layer",
+    "langgraph_checkpoint_cassandra",
     "tests",
 ]
 
 [[tool.mypy.overrides]]
 module = [
-  "chainlit.*",
   "cassandra.*",
   "cassandra_asyncio.*",
   "cassandra_asyncio_driver.*",

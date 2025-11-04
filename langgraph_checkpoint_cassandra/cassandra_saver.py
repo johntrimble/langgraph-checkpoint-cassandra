@@ -596,7 +596,7 @@ class CassandraSaver(BaseCheckpointSaver):
             pending_writes.append((write_row.task_id, write_row.channel, value))
 
         # Build parent config if parent exists
-        parent_config = None
+        parent_config: RunnableConfig | None = None
         if row.parent_checkpoint_id:
             parent_config = {
                 "configurable": {
@@ -783,7 +783,7 @@ class CassandraSaver(BaseCheckpointSaver):
             all_writes.extend(batch_result)
 
         # Group writes by checkpoint_id
-        writes_by_checkpoint = {}
+        writes_by_checkpoint: dict[str, list[tuple[str, str, Any]]] = {}
         for write_row in all_writes:
             checkpoint_id_key = str(write_row.checkpoint_id)
             if checkpoint_id_key not in writes_by_checkpoint:
@@ -800,7 +800,7 @@ class CassandraSaver(BaseCheckpointSaver):
             pending_writes = writes_by_checkpoint.get(checkpoint_id_key, [])
 
             # Build parent config
-            parent_config = None
+            parent_config: RunnableConfig | None = None
             if row.parent_checkpoint_id:
                 parent_config = {
                     "configurable": {
@@ -1000,12 +1000,6 @@ class CassandraSaver(BaseCheckpointSaver):
         self._prepare_statements()  # Ensure statements are prepared
         thread_id = self._convert_thread_id(thread_id_str)
 
-        # Convert UUIDs to strings for Cassandra statements if needed
-        if self.thread_id_type in ("uuid", "timeuuid") and isinstance(thread_id, UUID):
-            thread_id_param = str(thread_id)
-        else:
-            thread_id_param = thread_id
-
         logger.info(f"Deleting thread {thread_id_str}")
 
         # Use a logged batch to delete from both tables atomically
@@ -1016,13 +1010,13 @@ class CassandraSaver(BaseCheckpointSaver):
         delete_checkpoints_stmt = self.session.prepare(f"""
             DELETE FROM {self.keyspace}.checkpoints WHERE thread_id = ?
         """)
-        batch.add(delete_checkpoints_stmt, (thread_id_param,))
+        batch.add(delete_checkpoints_stmt, (thread_id,))
 
         # Delete all checkpoint writes for this thread
         delete_writes_stmt = self.session.prepare(f"""
             DELETE FROM {self.keyspace}.checkpoint_writes WHERE thread_id = ?
         """)
-        batch.add(delete_writes_stmt, (thread_id_param,))
+        batch.add(delete_writes_stmt, (thread_id,))
 
         # Execute the batch
         self.session.execute(batch)
@@ -1104,7 +1098,7 @@ class CassandraSaver(BaseCheckpointSaver):
             pending_writes.append((write_row.task_id, write_row.channel, value))
 
         # Build parent config if parent exists
-        parent_config = None
+        parent_config: RunnableConfig | None = None
         if row.parent_checkpoint_id:
             parent_config = {
                 "configurable": {
@@ -1295,7 +1289,7 @@ class CassandraSaver(BaseCheckpointSaver):
             all_writes.extend(batch_result)
 
         # Group writes by checkpoint_id
-        writes_by_checkpoint = {}
+        writes_by_checkpoint: dict[str, list[tuple[str, str, Any]]] = {}
         for write_row in all_writes:
             checkpoint_id_key = str(write_row.checkpoint_id)
             if checkpoint_id_key not in writes_by_checkpoint:
@@ -1312,7 +1306,7 @@ class CassandraSaver(BaseCheckpointSaver):
             pending_writes = writes_by_checkpoint.get(checkpoint_id_key, [])
 
             # Build parent config
-            parent_config = None
+            parent_config: RunnableConfig | None = None
             if row.parent_checkpoint_id:
                 parent_config = {
                     "configurable": {
@@ -1510,12 +1504,6 @@ class CassandraSaver(BaseCheckpointSaver):
 
         thread_id = self._convert_thread_id(thread_id_str)
 
-        # Convert UUIDs to strings for Cassandra statements if needed
-        if self.thread_id_type in ("uuid", "timeuuid") and isinstance(thread_id, UUID):
-            thread_id_param = str(thread_id)
-        else:
-            thread_id_param = thread_id
-
         logger.info(f"Deleting thread {thread_id_str}")
 
         # Use a logged batch to delete from both tables atomically
@@ -1526,13 +1514,13 @@ class CassandraSaver(BaseCheckpointSaver):
         delete_checkpoints_stmt = self.session.prepare(f"""
             DELETE FROM {self.keyspace}.checkpoints WHERE thread_id = ?
         """)
-        batch.add(delete_checkpoints_stmt, (thread_id_param,))
+        batch.add(delete_checkpoints_stmt, (thread_id,))
 
         # Delete all checkpoint writes for this thread
         delete_writes_stmt = self.session.prepare(f"""
             DELETE FROM {self.keyspace}.checkpoint_writes WHERE thread_id = ?
         """)
-        batch.add(delete_writes_stmt, (thread_id_param,))
+        batch.add(delete_writes_stmt, (thread_id,))
 
         if self.write_consistency:
             batch.consistency_level = self.write_consistency
