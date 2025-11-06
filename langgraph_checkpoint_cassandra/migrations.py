@@ -13,6 +13,7 @@ import time
 from dataclasses import dataclass
 from datetime import UTC, datetime
 import tomllib
+from typing import Any, Mapping
 
 from cassandra.cluster import Session
 
@@ -32,25 +33,19 @@ class Migration:
     checksum: str
     statements: list[str]
 
-    @classmethod
-    def from_dict(cls, migration_def: dict) -> Migration:
-        """Create a Migration from a dictionary definition."""
-        version = migration_def["version"]
-        name = migration_def.get("name", f"migration_{version}")
-        description = migration_def.get("description", "")
-        statements = migration_def.get("statements", [])
 
-        # Calculate checksum from statements
-        content = "\n".join(statements)
-        checksum = hashlib.sha256(content.encode()).hexdigest()
+def _compute_migration_checksum(statements: list[str]) -> str:
+    """
+    Compute a SHA256 checksum for migration statements.
 
-        return cls(
-            version=version,
-            name=name,
-            description=description,
-            checksum=checksum,
-            statements=statements,
-        )
+    Args:
+        statements: List of SQL statements (should be raw templates, not formatted)
+
+    Returns:
+        Hexadecimal checksum string
+    """
+    content = "\n".join(statements)
+    return hashlib.sha256(content.encode()).hexdigest()
 
 
 class MigrationManager:
@@ -81,6 +76,7 @@ class MigrationManager:
             )
         self.replication_factor = replication_factor
         self.migrations: list[Migration] = self._load_migrations(
+            migrations_template=self._get_default_migrations_template(),
             template_params={
                 "keyspace": self.keyspace,
                 "checkpoint_id_type": checkpoint_id_type.upper(),
@@ -167,7 +163,7 @@ class MigrationManager:
             return {row.version for row in result}
         except Exception as e:
             logger.debug(f"Could not get applied migrations: {e}")
-            return set()
+            raise
 
     def _record_migration(
         self,
@@ -193,13 +189,7 @@ class MigrationManager:
             ),
         )
 
-    def _load_migrations(self, template_params) -> list[Migration]:
-        """
-        Load default embedded migrations.
-
-        Migrations are defined in DEFAULT_MIGRATIONS and automatically
-        formatted with keyspace name and column types.
-        """
+    def _get_default_migrations_template(self) -> Any:
         migrations_path = Path(__file__).with_name("migrations.toml")
         if migrations_path.is_file():
             with migrations_path.open("rb") as fp:
@@ -207,7 +197,7 @@ class MigrationManager:
         else:
             try:
                 migrations_resource = resources.files(
-                    "chainlit_cassandra_data_layer"
+                    "langgraph_checkpoint_cassandra"
                 ).joinpath("migrations.toml")
             except FileNotFoundError as exc:  # pragma: no cover - defensive
                 raise FileNotFoundError(
@@ -215,23 +205,45 @@ class MigrationManager:
                 ) from exc
             with migrations_resource.open("rb") as fp:
                 migrations_data = tomllib.load(fp)
+        return migrations_data
 
+    def _load_migrations(self, migrations_template: Any, template_params: Mapping) -> list[Migration]:
+        """
+        Load default embedded migrations.
+
+        Migrations are defined in DEFAULT_MIGRATIONS and automatically
+        formatted with keyspace name and column types.
+        """
         logger.debug("Loading default embedded migrations")
 
-        raw_migrations = migrations_data.get("migration") or []
+        raw_migrations = migrations_template.get("migration") or []
         migrations = []
 
         for migration_def in raw_migrations:
             if "statements" in migration_def:
-                formatted_statements = [
-                    string.Template(stmt).safe_substitute(
-                        **template_params
-                    )
-                    for stmt in migration_def["statements"]
-                ]
-                migration_def = {**migration_def, "statements": formatted_statements}
+                # Keep raw statements for checksum calculation
+                raw_statements = migration_def["statements"]
 
-            migration = Migration.from_dict(migration_def)
+                # Compute checksum from raw templates (before substitution)
+                # This ensures checksum is consistent across different configurations
+                checksum = _compute_migration_checksum(raw_statements)
+
+                # Format statements for execution
+                formatted_statements = [
+                    string.Template(stmt).safe_substitute(**template_params)
+                    for stmt in raw_statements
+                ]
+
+                # Create modified migration_def with formatted statements
+                formatted_migration_def = {
+                    **migration_def,
+                    "statements": formatted_statements,
+                }
+            else:
+                checksum = ""
+                formatted_migration_def = migration_def
+
+            migration = Migration(**formatted_migration_def, checksum=checksum)
             migrations.append(migration)
 
         # Sort by version
@@ -303,14 +315,14 @@ class MigrationManager:
         # Ensure migration tables exist
         self._ensure_migration_tables()
 
-        # Get pending migrations
+        # Get pending migrations (initial check)
         pending = self.get_pending_migrations()
 
         if not pending:
             logger.info("No pending migrations")
             return 0
 
-        logger.info(f"Found {len(pending)} pending migrations")
+        logger.info(f"Found {len(pending)} pending migration(s)")
 
         # Try to acquire lock with retry
         start_wait = time.time()
@@ -329,11 +341,19 @@ class MigrationManager:
             )
 
         try:
+            # Re-check pending migrations after acquiring lock
+            # (another process may have applied them while we waited)
+            pending = self.get_pending_migrations()
+
+            if not pending:
+                logger.info("No pending migrations (already applied by another process)")
+                return 0
+
             # Apply migrations
             for migration in pending:
                 self.apply_migration(migration)
 
-            logger.info(f"Successfully applied {len(pending)} migrations")
+            logger.info(f"Successfully applied {len(pending)} migration(s)")
             return len(pending)
 
         finally:
