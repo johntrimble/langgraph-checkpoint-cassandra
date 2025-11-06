@@ -5,7 +5,8 @@ Tests for metadata filtering with flattened dot notation.
 import pytest
 from cassandra.cluster import Cluster
 from langgraph.checkpoint.base import Checkpoint, CheckpointMetadata
-from langgraph_checkpoint_cassandra import CassandraSaver, drop_schema
+from langgraph_checkpoint_cassandra import CassandraSaver
+from tests.utils import drop_schema
 
 TEST_KEYSPACE = "test_metadata_filtering"
 CASSANDRA_HOST = "cassandra"

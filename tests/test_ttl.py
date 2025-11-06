@@ -8,7 +8,7 @@ import pytest
 from cassandra.cluster import Cluster
 
 from langgraph_checkpoint_cassandra import CassandraSaver
-from langgraph_checkpoint_cassandra.schema import drop_schema
+from tests.utils import drop_schema
 
 TEST_KEYSPACE = "test_ttl"
 
