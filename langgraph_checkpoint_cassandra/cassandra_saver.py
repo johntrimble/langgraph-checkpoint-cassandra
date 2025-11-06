@@ -8,6 +8,7 @@ from collections.abc import AsyncIterator, Iterator, Sequence
 from contextlib import contextmanager
 from typing import Any, Literal, get_args, get_origin
 from uuid import UUID
+from textwrap import dedent
 
 from cassandra.cluster import Cluster, Session
 from cassandra.query import (
@@ -484,6 +485,7 @@ class CassandraSaver(BaseCheckpointSaver):
         write_consistency: ConsistencyLevel | None = ConsistencyLevel.LOCAL_QUORUM,
         metadata_includes: list[str] | None = None,
         metadata_excludes: list[str] | None = None,
+        fetch_size: int | None = None,
     ) -> None:
         """
         Initialize the CassandraSaver.
@@ -507,6 +509,9 @@ class CassandraSaver(BaseCheckpointSaver):
                              Fields matching any pattern will not be indexed (even if they match an include pattern).
                              Examples: ["*.password", "*.secret", "debug.*"]
                              Default (None): exclude no fields.
+            fetch_size: Optional Cassandra fetch size (rows per page). Leave as None to use the driver's
+                        default (typically 5000). Provide a positive integer to override on all prepared
+                        statements.
 
         Note:
             You must call `.setup()` before using the checkpointer to create the required tables.
@@ -529,112 +534,139 @@ class CassandraSaver(BaseCheckpointSaver):
         self.write_consistency = write_consistency
         self.metadata_includes = metadata_includes
         self.metadata_excludes = metadata_excludes
+        self.fetch_size = fetch_size
 
-        self._statements_prepared = False
+        self._prepared_statements: dict[str, Any] = {}
 
-    def _prepare_statements(self) -> None:
-        """Prepare CQL statements for reuse."""
-        if self._statements_prepared:
-            return
+    def _get_prepared_statement(
+        self, query: str, *, consistency: ConsistencyLevel | None = None
+    ) -> Any:
+        """Return a prepared statement for the given query, preparing it lazily."""
+        stmt = self._prepared_statements.get(query)
+        if stmt is None:
+            stmt = self.session.prepare(query)
+            if self.fetch_size is not None and hasattr(stmt, "fetch_size"):
+                stmt.fetch_size = self.fetch_size
+            self._prepared_statements[query] = stmt
 
-        # Checkpoint queries
-        self.stmt_get_checkpoint_by_id = self.session.prepare(f"""
+        if consistency is not None and getattr(stmt, "consistency_level", None) != consistency:
+            stmt.consistency_level = consistency
+
+        return stmt
+
+    def _execute_prepared(
+        self,
+        query: str,
+        parameters: Sequence[Any] | tuple[Any, ...] = (),
+        *,
+        consistency: ConsistencyLevel | None = None,
+    ) -> Any:
+        """Execute a prepared statement synchronously, preparing it on demand."""
+        stmt = self._get_prepared_statement(query, consistency=consistency)
+        return self.session.execute(stmt, tuple(parameters))
+
+    async def _aexecute_prepared(
+        self,
+        query: str,
+        parameters: Sequence[Any] | tuple[Any, ...] = (),
+        *,
+        consistency: ConsistencyLevel | None = None,
+    ) -> Any:
+        """Execute a prepared statement asynchronously, preparing it on demand."""
+        stmt = self._get_prepared_statement(query, consistency=consistency)
+        return await self.session.aexecute(stmt, tuple(parameters))
+
+    def _query_get_checkpoint_by_id(self) -> str:
+        return dedent(
+            f"""
             SELECT thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id,
                    type, checkpoint, metadata
             FROM {self.keyspace}.checkpoints
             WHERE thread_id = ? AND checkpoint_ns = ? AND checkpoint_id = ?
-        """)
+            """
+        ).strip()
 
-        self.stmt_get_latest_checkpoint = self.session.prepare(f"""
+    def _query_get_latest_checkpoint(self) -> str:
+        return dedent(
+            f"""
             SELECT thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id,
                    type, checkpoint, metadata
             FROM {self.keyspace}.checkpoints
             WHERE thread_id = ? AND checkpoint_ns = ?
             LIMIT 1
-        """)
+            """
+        ).strip()
 
-        self.stmt_list_checkpoints = self.session.prepare(f"""
+    def _query_list_checkpoints(self, limit: int | None = None) -> str:
+        base = dedent(
+            f"""
             SELECT thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id,
                    type, checkpoint, metadata
             FROM {self.keyspace}.checkpoints
             WHERE thread_id = ? AND checkpoint_ns = ?
-        """)
+            """
+        ).strip()
+        if limit is not None:
+            return f"{base} LIMIT {limit}"
+        return base
 
-        self.stmt_list_checkpoints_before = self.session.prepare(f"""
+    def _query_list_checkpoints_before(self, limit: int | None = None) -> str:
+        base = dedent(
+            f"""
             SELECT thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id,
                    type, checkpoint, metadata
             FROM {self.keyspace}.checkpoints
             WHERE thread_id = ? AND checkpoint_ns = ? AND checkpoint_id < ?
-        """)
+            """
+        ).strip()
+        if limit is not None:
+            return f"{base} LIMIT {limit}"
+        return base
 
-        # Prepare insert statement with or without TTL
-        if self.ttl_seconds is not None:
-            self.stmt_insert_checkpoint = self.session.prepare(f"""
-                INSERT INTO {self.keyspace}.checkpoints
-                (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id,
-                 type, checkpoint, metadata)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                USING TTL {self.ttl_seconds}
-            """)
-        else:
-            self.stmt_insert_checkpoint = self.session.prepare(f"""
-                INSERT INTO {self.keyspace}.checkpoints
-                (thread_id, checkpoint_ns, checkpoint_id, parent_checkpoint_id,
-                 type, checkpoint, metadata)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-            """)
-
-        self.stmt_delete_checkpoints = self.session.prepare(f"""
-            DELETE FROM {self.keyspace}.checkpoints
-            WHERE thread_id = ? AND checkpoint_ns = ?
-        """)
-
-        # Checkpoint writes queries
-        self.stmt_get_writes = self.session.prepare(f"""
+    def _query_get_writes(self) -> str:
+        return dedent(
+            f"""
             SELECT task_id, task_path, idx, channel, type, value
             FROM {self.keyspace}.checkpoint_writes
             WHERE thread_id = ? AND checkpoint_ns = ? AND checkpoint_id = ?
-        """)
+            """
+        ).strip()
 
-        # Prepare write insert statement with or without TTL
+    def _query_fetch_writes_batch(self) -> str:
+        return dedent(
+            f"""
+            SELECT checkpoint_id, task_id, task_path, idx, channel, type, value
+            FROM {self.keyspace}.checkpoint_writes
+            WHERE thread_id = ? AND checkpoint_ns = ? AND checkpoint_id IN ?
+            """
+        ).strip()
+
+    def _query_insert_write(self) -> str:
         if self.ttl_seconds is not None:
-            self.stmt_insert_write = self.session.prepare(f"""
+            return dedent(
+                f"""
                 INSERT INTO {self.keyspace}.checkpoint_writes
                 (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path,
                  idx, channel, type, value)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 USING TTL {self.ttl_seconds}
-            """)
-        else:
-            self.stmt_insert_write = self.session.prepare(f"""
-                INSERT INTO {self.keyspace}.checkpoint_writes
-                (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path,
-                 idx, channel, type, value)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-            """)
+                """
+            ).strip()
 
-        self.stmt_delete_writes = self.session.prepare(f"""
-            DELETE FROM {self.keyspace}.checkpoint_writes
-            WHERE thread_id = ? AND checkpoint_ns = ? AND checkpoint_id = ?
-        """)
+        return dedent(
+            f"""
+            INSERT INTO {self.keyspace}.checkpoint_writes
+            (thread_id, checkpoint_ns, checkpoint_id, task_id, task_path,
+             idx, channel, type, value)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            """
+        ).strip()
 
-        # Set consistency levels on prepared statements
-        if self.read_consistency is not None:
-            # Read statements
-            self.stmt_get_checkpoint_by_id.consistency_level = self.read_consistency
-            self.stmt_get_latest_checkpoint.consistency_level = self.read_consistency
-            self.stmt_list_checkpoints.consistency_level = self.read_consistency
-            self.stmt_list_checkpoints_before.consistency_level = self.read_consistency
-            self.stmt_get_writes.consistency_level = self.read_consistency
+    def _query_delete_thread_checkpoints(self) -> str:
+        return f"DELETE FROM {self.keyspace}.checkpoints WHERE thread_id = ?"
 
-        if self.write_consistency is not None:
-            # Write statements
-            self.stmt_insert_checkpoint.consistency_level = self.write_consistency
-            self.stmt_delete_checkpoints.consistency_level = self.write_consistency
-            self.stmt_insert_write.consistency_level = self.write_consistency
-            self.stmt_delete_writes.consistency_level = self.write_consistency
-
-        self._statements_prepared = True
+    def _query_delete_thread_writes(self) -> str:
+        return f"DELETE FROM {self.keyspace}.checkpoint_writes WHERE thread_id = ?"
 
     @classmethod
     @contextmanager
@@ -722,8 +754,6 @@ class CassandraSaver(BaseCheckpointSaver):
         )
         mm.migrate()
 
-        # Prepare statements now that tables exist
-        self._prepare_statements()
         logger.info("✓ Checkpoint schema ready")
 
     @staticmethod
@@ -809,7 +839,6 @@ class CassandraSaver(BaseCheckpointSaver):
         Returns:
             CheckpointTuple if found, None otherwise
         """
-        self._prepare_statements()  # Ensure statements are prepared
         thread_id_str = config["configurable"]["thread_id"]
         thread_id = self._convert_thread_id(thread_id_str)
         checkpoint_ns = config["configurable"].get("checkpoint_ns", "")
@@ -818,7 +847,11 @@ class CassandraSaver(BaseCheckpointSaver):
         stmt, params = self._build_get_checkpoint_query(
             thread_id, checkpoint_ns, checkpoint_id_str
         )
-        result = self.session.execute(stmt, params)
+        result = self._execute_prepared(
+            stmt,
+            params,
+            consistency=self.read_consistency,
+        )
         row = self._first_row(result)
         if not row:
             return None
@@ -831,9 +864,10 @@ class CassandraSaver(BaseCheckpointSaver):
             else None
         )
 
-        writes_result = self.session.execute(
-            self.stmt_get_writes,
+        writes_result = self._execute_prepared(
+            self._query_get_writes(),
             (thread_id, checkpoint_ns, checkpoint_id_for_writes),
+            consistency=self.read_consistency,
         )
 
         pending_writes = self._deserialize_writes(writes_result)
@@ -874,7 +908,8 @@ class CassandraSaver(BaseCheckpointSaver):
         checkpoint_ns: str,
         indexed_filters: dict[str, Any],
         before: RunnableConfig | None,
-    ) -> tuple[str, list[Any]] | None:
+        limit: int | None,
+    ) -> tuple[str, list[Any]]:
         """Build CQL query and parameters for listing checkpoints with filters.
 
         Args:
@@ -882,12 +917,33 @@ class CassandraSaver(BaseCheckpointSaver):
             checkpoint_ns: Checkpoint namespace
             indexed_filters: Filters to apply server-side
             before: Optional "before" configuration for pagination
+            limit: Desired number of rows (used when all filtering is server-side)
 
         Returns:
-            Tuple of (query_string, query_params) if filters exist, None otherwise
+            Tuple of (query_string, query_params)
         """
+        limit_val = None
+        if limit is not None:
+            try:
+                limit_val = int(limit)
+            except (TypeError, ValueError):
+                raise ValueError(f"limit must be an integer, got {limit!r}")
+            if limit_val < 0:
+                raise ValueError("limit cannot be negative")
+
         if not indexed_filters:
-            return None
+            if before:
+                before_id_str = before["configurable"]["checkpoint_id"]
+                before_id = self._convert_checkpoint_id(before_id_str)
+                return (
+                    self._query_list_checkpoints_before(limit_val),
+                    [thread_id, checkpoint_ns, before_id],
+                )
+
+            return (
+                self._query_list_checkpoints(limit_val),
+                [thread_id, checkpoint_ns],
+            )
 
         # Build dynamic query with metadata filters
         query_parts = [
@@ -928,6 +984,9 @@ class CassandraSaver(BaseCheckpointSaver):
 
         # Build final query
         # No ALLOW FILTERING needed - SAI indexes on metadata columns handle filtering efficiently
+        if limit_val is not None:
+            query_parts.append(f"LIMIT {limit_val}")
+
         query = " ".join(query_parts)
 
         return query, query_params
@@ -996,15 +1055,19 @@ class CassandraSaver(BaseCheckpointSaver):
         Returns:
             Dictionary mapping checkpoint_id (as string) to list of writes
         """
-        batch_query, params_list = self._prepare_fetch_writes_batches(
+        query, params_list = self._prepare_fetch_writes_batches(
             thread_id, checkpoint_ns, checkpoints
         )
-        if batch_query is None:
+        if query is None:
             return {}
 
         all_writes: list[Any] = []
         for params in params_list:
-            batch_result = self.session.execute(batch_query, params)
+            batch_result = self._execute_prepared(
+                query,
+                params,
+                consistency=self.read_consistency,
+            )
             all_writes.extend(batch_result)
 
         return self._group_writes_by_checkpoint(all_writes)
@@ -1025,15 +1088,19 @@ class CassandraSaver(BaseCheckpointSaver):
         Returns:
             Dictionary mapping checkpoint_id (as string) to list of writes
         """
-        batch_query, params_list = self._prepare_fetch_writes_batches(
+        query, params_list = self._prepare_fetch_writes_batches(
             thread_id, checkpoint_ns, checkpoints
         )
-        if batch_query is None:
+        if query is None:
             return {}
 
         all_writes: list[Any] = []
         for params in params_list:
-            batch_result = await self.session.aexecute(batch_query, params)
+            batch_result = await self._aexecute_prepared(
+                query,
+                params,
+                consistency=self.read_consistency,
+            )
             all_writes.extend(batch_result)
 
         return self._group_writes_by_checkpoint(all_writes)
@@ -1090,15 +1157,15 @@ class CassandraSaver(BaseCheckpointSaver):
         thread_id: Any,
         checkpoint_ns: str,
         checkpoint_id_str: str | None,
-    ) -> tuple[Any, tuple[Any, ...]]:
-        """Return statement and parameters for fetching a checkpoint row."""
+    ) -> tuple[str, tuple[Any, ...]]:
+        """Return query and parameters for fetching a checkpoint row."""
         if checkpoint_id_str:
             checkpoint_id = self._convert_checkpoint_id(checkpoint_id_str)
             return (
-                self.stmt_get_checkpoint_by_id,
+                self._query_get_checkpoint_by_id(),
                 (thread_id, checkpoint_ns, checkpoint_id),
             )
-        return (self.stmt_get_latest_checkpoint, (thread_id, checkpoint_ns))
+        return (self._query_get_latest_checkpoint(), (thread_id, checkpoint_ns))
 
     @staticmethod
     def _first_row(result: Any) -> Any | None:
@@ -1140,26 +1207,14 @@ class CassandraSaver(BaseCheckpointSaver):
         checkpoint_ns: str,
         indexed_filters: dict[str, Any],
         before: RunnableConfig | None,
-    ) -> tuple[Any, tuple[Any, ...]]:
-        """Construct the Cassandra statement and params for listing checkpoints."""
-        query_and_params = self._build_list_query(
-            thread_id, checkpoint_ns, indexed_filters, before
+        limit: int | None,
+    ) -> tuple[str, tuple[Any, ...]]:
+        """Construct the Cassandra query and params for listing checkpoints."""
+        query, query_params = self._build_list_query(
+            thread_id, checkpoint_ns, indexed_filters, before, limit
         )
 
-        if query_and_params:
-            query, query_params = query_and_params
-            prepared_query = self.session.prepare(query)
-            return prepared_query, tuple(query_params)
-
-        if before:
-            before_id_str = before["configurable"]["checkpoint_id"]
-            before_id = self._convert_checkpoint_id(before_id_str)
-            return (
-                self.stmt_list_checkpoints_before,
-                (thread_id, checkpoint_ns, before_id),
-            )
-
-        return (self.stmt_list_checkpoints, (thread_id, checkpoint_ns))
+        return query, tuple(query_params)
 
     def _build_checkpoint_tuples_from_writes(
         self,
@@ -1192,8 +1247,8 @@ class CassandraSaver(BaseCheckpointSaver):
         config: RunnableConfig,
         checkpoint: Checkpoint,
         metadata: CheckpointMetadata,
-    ) -> tuple[str, str, str, Any, tuple[Any, ...]]:
-        """Prepare statement and parameters for inserting a checkpoint."""
+    ) -> tuple[str, str, str, str, tuple[Any, ...]]:
+        """Prepare query and parameters for inserting a checkpoint."""
         thread_id_str = config["configurable"]["thread_id"]
         checkpoint_ns = config["configurable"].get("checkpoint_ns", "")
         checkpoint_id_str = checkpoint["id"]
@@ -1246,26 +1301,22 @@ class CassandraSaver(BaseCheckpointSaver):
         column_list = ", ".join(columns)
 
         if self.ttl_seconds is not None:
-            insert_query = f"""
+            query = f"""
                 INSERT INTO {self.keyspace}.checkpoints ({column_list})
                 VALUES ({placeholders})
                 USING TTL {self.ttl_seconds}
             """
         else:
-            insert_query = f"""
+            query = f"""
                 INSERT INTO {self.keyspace}.checkpoints ({column_list})
                 VALUES ({placeholders})
             """
-
-        prepared_stmt = self.session.prepare(insert_query)
-        if self.write_consistency:
-            prepared_stmt.consistency_level = self.write_consistency
 
         return (
             thread_id_str,
             checkpoint_ns,
             checkpoint_id_str,
-            prepared_stmt,
+            query,
             params,
         )
 
@@ -1308,19 +1359,11 @@ class CassandraSaver(BaseCheckpointSaver):
         thread_id: Any,
         checkpoint_ns: str,
         checkpoints: list[tuple[Any, Checkpoint, CheckpointMetadata]],
-    ) -> tuple[Any | None, list[tuple[Any, ...]]]:
-        """Prepare batched queries for fetching pending writes."""
+    ) -> tuple[str | None, list[tuple[Any, ...]]]:
+        """Prepare batched query parameters for fetching pending writes."""
         checkpoint_ids = [row.checkpoint_id for row, _, _ in checkpoints]
         if not checkpoint_ids:
             return None, []
-
-        batch_query = self.session.prepare(
-            f"""
-                SELECT checkpoint_id, task_id, task_path, idx, channel, type, value
-                FROM {self.keyspace}.checkpoint_writes
-                WHERE thread_id = ? AND checkpoint_ns = ? AND checkpoint_id IN ?
-            """
-        )
 
         params_list: list[tuple[Any, ...]] = []
         BATCH_SIZE = 250
@@ -1328,7 +1371,7 @@ class CassandraSaver(BaseCheckpointSaver):
             batch_ids = checkpoint_ids[i : i + BATCH_SIZE]
             params_list.append((thread_id, checkpoint_ns, batch_ids))
 
-        return batch_query, params_list
+        return self._query_fetch_writes_batch(), params_list
 
     def _group_writes_by_checkpoint(
         self, write_rows: Sequence[Any]
@@ -1351,13 +1394,17 @@ class CassandraSaver(BaseCheckpointSaver):
 
         batch = BatchStatement(batch_type=BatchType.LOGGED)
 
-        delete_checkpoints_stmt = self.session.prepare(
-            f"DELETE FROM {self.keyspace}.checkpoints WHERE thread_id = ?"
+        delete_checkpoint_query = self._query_delete_thread_checkpoints()
+        delete_checkpoints_stmt = self._get_prepared_statement(
+            delete_checkpoint_query,
+            consistency=self.write_consistency,
         )
         batch.add(delete_checkpoints_stmt, (thread_id,))
 
-        delete_writes_stmt = self.session.prepare(
-            f"DELETE FROM {self.keyspace}.checkpoint_writes WHERE thread_id = ?"
+        delete_writes_query = self._query_delete_thread_writes()
+        delete_writes_stmt = self._get_prepared_statement(
+            delete_writes_query,
+            consistency=self.write_consistency,
         )
         batch.add(delete_writes_stmt, (thread_id,))
 
@@ -1406,7 +1453,6 @@ class CassandraSaver(BaseCheckpointSaver):
             >>> # For nested metadata {"config": {"file.txt": "content"}}, use:
             >>> list(config, filter={"config.file\\.txt": "content"})
         """
-        self._prepare_statements()
         if not config:
             return
 
@@ -1417,10 +1463,19 @@ class CassandraSaver(BaseCheckpointSaver):
         # Split filters into indexed (server-side) and non-indexed (client-side)
         indexed_filters, non_indexed_filters = self._split_and_validate_filters(filter)
 
+        if limit == 0:
+            return
+
+        server_side_limit = limit if not non_indexed_filters else None
+
         stmt, params = self._build_list_statement(
-            thread_id, checkpoint_ns, indexed_filters, before
+            thread_id, checkpoint_ns, indexed_filters, before, server_side_limit
         )
-        result = self.session.execute(stmt, params)
+        result = self._execute_prepared(
+            stmt,
+            params,
+            consistency=self.read_consistency,
+        )
 
         # Deserialize checkpoints and apply client-side filters
         checkpoints_to_return = self._deserialize_and_filter_checkpoints(
@@ -1463,16 +1518,19 @@ class CassandraSaver(BaseCheckpointSaver):
         Returns:
             Updated configuration after storing the checkpoint
         """
-        self._prepare_statements()  # Ensure statements are prepared
         (
             thread_id_str,
             checkpoint_ns,
             checkpoint_id_str,
-            prepared_stmt,
+            query,
             params,
         ) = self._prepare_checkpoint_insert(config, checkpoint, metadata)
 
-        self.session.execute(prepared_stmt, params)
+        self._execute_prepared(
+            query,
+            params,
+            consistency=self.write_consistency,
+        )
 
         return {
             "configurable": {
@@ -1498,11 +1556,15 @@ class CassandraSaver(BaseCheckpointSaver):
             task_id: Identifier for the task creating the writes
             task_path: Path of the task creating the writes
         """
-        self._prepare_statements()  # Ensure statements are prepared
         params_list = self._prepare_write_rows(config, writes, task_id, task_path)
 
+        query = self._query_insert_write()
         for params in params_list:
-            self.session.execute(self.stmt_insert_write, params)
+            self._execute_prepared(
+                query,
+                params,
+                consistency=self.write_consistency,
+            )
 
     def delete_thread(self, thread_id_str: str) -> None:
         """
@@ -1514,8 +1576,6 @@ class CassandraSaver(BaseCheckpointSaver):
         Args:
             thread_id_str: The thread ID whose checkpoints should be deleted
         """
-        self._prepare_statements()  # Ensure statements are prepared
-
         logger.info(f"Deleting thread {thread_id_str}")
 
         _, batch = self._prepare_delete_thread_batch(thread_id_str)
@@ -1559,7 +1619,6 @@ class CassandraSaver(BaseCheckpointSaver):
             NotImplementedError: If session doesn't support async operations
         """
         self._ensure_async_support()
-        self._prepare_statements()
 
         thread_id_str = config["configurable"]["thread_id"]
         thread_id = self._convert_thread_id(thread_id_str)
@@ -1569,7 +1628,11 @@ class CassandraSaver(BaseCheckpointSaver):
         stmt, params = self._build_get_checkpoint_query(
             thread_id, checkpoint_ns, checkpoint_id_str
         )
-        result = await self.session.aexecute(stmt, params)
+        result = await self._aexecute_prepared(
+            stmt,
+            params,
+            consistency=self.read_consistency,
+        )
         row = self._first_row(result)
         if not row:
             return None
@@ -1582,9 +1645,10 @@ class CassandraSaver(BaseCheckpointSaver):
             else None
         )
 
-        writes_result = await self.session.aexecute(
-            self.stmt_get_writes,
+        writes_result = await self._aexecute_prepared(
+            self._query_get_writes(),
             (thread_id, checkpoint_ns, checkpoint_id_for_writes),
+            consistency=self.read_consistency,
         )
 
         pending_writes = self._deserialize_writes(writes_result)
@@ -1622,7 +1686,6 @@ class CassandraSaver(BaseCheckpointSaver):
             NotImplementedError: If session doesn't support async operations
         """
         self._ensure_async_support()
-        self._prepare_statements()
 
         if not config:
             return
@@ -1634,10 +1697,19 @@ class CassandraSaver(BaseCheckpointSaver):
         # Split filters into indexed (server-side) and non-indexed (client-side)
         indexed_filters, non_indexed_filters = self._split_and_validate_filters(filter)
 
+        if limit == 0:
+            return
+
+        server_side_limit = limit if not non_indexed_filters else None
+
         stmt, params = self._build_list_statement(
-            thread_id, checkpoint_ns, indexed_filters, before
+            thread_id, checkpoint_ns, indexed_filters, before, server_side_limit
         )
-        result = await self.session.aexecute(stmt, params)
+        result = await self._aexecute_prepared(
+            stmt,
+            params,
+            consistency=self.read_consistency,
+        )
 
         # Deserialize checkpoints and apply client-side filters
         checkpoints_to_return = self._deserialize_and_filter_checkpoints(
@@ -1684,17 +1756,20 @@ class CassandraSaver(BaseCheckpointSaver):
             NotImplementedError: If session doesn't support async operations
         """
         self._ensure_async_support()
-        self._prepare_statements()
 
         (
             thread_id_str,
             checkpoint_ns,
             checkpoint_id_str,
-            prepared_stmt,
+            query,
             params,
         ) = self._prepare_checkpoint_insert(config, checkpoint, metadata)
 
-        await self.session.aexecute(prepared_stmt, params)
+        await self._aexecute_prepared(
+            query,
+            params,
+            consistency=self.write_consistency,
+        )
 
         return {
             "configurable": {
@@ -1724,12 +1799,16 @@ class CassandraSaver(BaseCheckpointSaver):
             NotImplementedError: If session doesn't support async operations
         """
         self._ensure_async_support()
-        self._prepare_statements()
 
         params_list = self._prepare_write_rows(config, writes, task_id, task_path)
 
+        query = self._query_insert_write()
         for params in params_list:
-            await self.session.aexecute(self.stmt_insert_write, params)
+            await self._aexecute_prepared(
+                query,
+                params,
+                consistency=self.write_consistency,
+            )
 
     async def adelete_thread(self, thread_id_str: str) -> None:
         """
@@ -1742,7 +1821,6 @@ class CassandraSaver(BaseCheckpointSaver):
             NotImplementedError: If session doesn't support async operations
         """
         self._ensure_async_support()
-        self._prepare_statements()
 
         logger.info(f"Deleting thread {thread_id_str}")
 

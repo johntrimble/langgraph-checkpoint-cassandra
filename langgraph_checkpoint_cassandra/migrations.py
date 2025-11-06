@@ -224,15 +224,13 @@ class MigrationManager:
                 # Keep raw statements for checksum calculation
                 raw_statements = migration_def["statements"]
 
-                # Compute checksum from raw templates (before substitution)
-                # This ensures checksum is consistent across different configurations
-                checksum = _compute_migration_checksum(raw_statements)
-
                 # Format statements for execution
                 formatted_statements = [
                     string.Template(stmt).safe_substitute(**template_params)
                     for stmt in raw_statements
                 ]
+
+                checksum = _compute_migration_checksum(formatted_statements)
 
                 # Create modified migration_def with formatted statements
                 formatted_migration_def = {
