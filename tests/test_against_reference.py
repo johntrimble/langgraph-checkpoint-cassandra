@@ -383,23 +383,16 @@ def savers(clusters):
     # Cleanup any existing keyspaces from previous runs FIRST
     cleanup_keyspaces(sync_session, [sync_keyspace, async_keyspace])
 
-    # Configure queryable metadata fields to match our filter generation strategy
-    # Note: tags is excluded because InMemorySaver doesn't support CONTAINS semantics
-    queryable_metadata = {
-        "user_id": str,
-        "step_num": int,
-        "score": float,
-    }
-
     # Create sync saver and setup schema
+    # Note: Metadata filtering is now automatic via flattened metadata columns
     sync_saver = CassandraSaver(
-        sync_session, keyspace=sync_keyspace, queryable_metadata=queryable_metadata
+        sync_session, keyspace=sync_keyspace
     )
     sync_saver.setup(replication_factor=1)
 
     # Create async saver (with async session) and setup schema
     async_saver = CassandraSaver(
-        async_session, keyspace=async_keyspace, queryable_metadata=queryable_metadata
+        async_session, keyspace=async_keyspace
     )
     async_saver.setup(replication_factor=1)
 
