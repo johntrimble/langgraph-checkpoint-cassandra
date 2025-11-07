@@ -4,10 +4,10 @@ Cassandra-based checkpoint saver implementation for LangGraph.
 
 import fnmatch
 import logging
-from collections.abc import AsyncIterator, Iterator, Sequence
+from collections.abc import AsyncIterator, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from textwrap import dedent
-from typing import Any, Literal, get_args, get_origin
+from typing import Any, Literal, TypedDict, cast, get_args, get_origin
 from uuid import UUID
 
 from cassandra.cluster import Cluster, Session
@@ -35,6 +35,14 @@ logger = logging.getLogger(__name__)
 DEFAULT_KEYSPACE = "langgraph_checkpoints"
 DEFAULT_CONTACT_POINTS = ["localhost"]
 DEFAULT_PORT = 9042
+
+
+class FlattenedMetadata(TypedDict):
+    metadata_text: dict[str, str]
+    metadata_int: dict[str, int]
+    metadata_double: dict[str, float]
+    metadata_bool: dict[str, bool]
+    metadata_null: set[str]
 
 
 def _escape_dots(key: str) -> str:
@@ -191,7 +199,7 @@ def _split_filters(
     return indexed, non_indexed
 
 
-def _get_nested_value(obj: dict[str, Any], path: str) -> Any:
+def _get_nested_value(obj: Mapping[str, Any], path: str) -> Any:
     """Get a value from a nested dictionary using dot notation.
 
     Args:
@@ -232,18 +240,19 @@ def _get_nested_value(obj: dict[str, Any], path: str) -> Any:
         parts.append(current)
 
     # Traverse the nested structure
-    result = obj
+    result: Any = obj
     for part in parts:
-        if isinstance(result, dict):
-            result = result.get(part)
-            if result is None:
-                return None
-        else:
+        if not isinstance(result, Mapping):
+            return None
+        result = result.get(part)
+        if result is None:
             return None
     return result
 
 
-def _matches_filter(metadata: dict[str, Any], filter_dict: dict[str, Any]) -> bool:
+def _matches_filter(
+    metadata: Mapping[str, Any], filter_dict: Mapping[str, Any]
+) -> bool:
     """Check if metadata matches all filters.
 
     Args:
@@ -269,11 +278,11 @@ def _matches_filter(metadata: dict[str, Any], filter_dict: dict[str, Any]) -> bo
 
 
 def _flatten_metadata(
-    metadata: dict[str, Any],
+    metadata: Mapping[str, Any],
     prefix: str = "",
     includes: list[str] | None = None,
     excludes: list[str] | None = None,
-) -> dict[str, dict[str, Any]]:
+) -> FlattenedMetadata:
     r"""Flatten nested metadata into typed maps using dot notation for nested keys.
 
     This function recursively flattens nested dictionaries, using dot notation to represent
@@ -334,12 +343,12 @@ def _flatten_metadata(
             'metadata_null': set()
         }
     """
-    result = {
+    result: FlattenedMetadata = {
         "metadata_text": {},
         "metadata_int": {},
         "metadata_double": {},
         "metadata_bool": {},
-        "metadata_null": set(),
+        "metadata_null": set[str](),
     }
 
     for key, value in metadata.items():
@@ -353,12 +362,14 @@ def _flatten_metadata(
                 result["metadata_null"].add(full_key)
         elif isinstance(value, dict):
             # Recursively flatten nested dicts (pass includes/excludes through)
-            nested = _flatten_metadata(value, full_key, includes, excludes)
-            for map_name, entries in nested.items():
-                if map_name == "metadata_null":
-                    result[map_name].update(entries)
-                else:
-                    result[map_name].update(entries)
+            nested = _flatten_metadata(
+                cast(dict[str, Any], value), full_key, includes, excludes
+            )
+            result["metadata_text"].update(nested["metadata_text"])
+            result["metadata_int"].update(nested["metadata_int"])
+            result["metadata_double"].update(nested["metadata_double"])
+            result["metadata_bool"].update(nested["metadata_bool"])
+            result["metadata_null"].update(nested["metadata_null"])
         elif isinstance(value, bool):
             # Check bool before int (bool is subclass of int in Python)
             if _should_include_field(full_key, includes, excludes):
