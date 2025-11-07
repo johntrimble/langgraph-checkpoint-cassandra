@@ -45,6 +45,7 @@ jobs:
         push: false
         load: false
         set: |
+          dev.cache-from=type=gha,scope=ci
           dev.cache-to=type=gha,mode=max,scope=ci
 
   lint:
@@ -139,7 +140,7 @@ jobs:
 
     - name: Run tests in dev container
       run: |
-        docker compose run --rm dev uvx tox -q
+        docker compose run --rm dev uvx tox -q 
 
     - name: Show Cassandra logs on failure
       if: failure()
