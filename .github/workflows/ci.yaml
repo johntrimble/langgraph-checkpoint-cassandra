@@ -120,6 +120,37 @@ jobs:
       run: |
         docker compose down -v
 
+  distribution-test:
+    runs-on: ubuntu-latest
+    needs: build-image
+
+    steps:
+    - *checkout_step
+
+    - *setup_buildx_step
+
+    - *bootstrap_step
+
+    - *load_from_cache_step
+
+    - name: Build images with docker compose
+      run: |
+        docker compose build
+
+    - name: Run tests in dev container
+      run: |
+        docker compose run --rm dev uvx tox -q
+
+    - name: Show Cassandra logs on failure
+      if: failure()
+      run: |
+        docker compose logs cassandra
+
+    - name: Cleanup
+      if: always()
+      run: |
+        docker compose down -v
+
   typecheck:
     runs-on: ubuntu-latest
     needs: build-image
