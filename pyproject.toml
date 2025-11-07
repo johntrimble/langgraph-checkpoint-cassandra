@@ -28,6 +28,7 @@ dev = [
     "pytest>=8.4.2",
     "pytest-asyncio>=1.2.0",
     "ruff>=0.8.6",
+    "mypy>=1.18.2",
 ]
 
 [tool.ruff]
@@ -49,6 +50,31 @@ indent-style = "space"
 skip-magic-trailing-comma = false
 # Automatically detect line ending
 line-ending = "auto"
+
+[tool.mypy]
+python_version = "3.12"
+warn_unused_configs = true
+warn_return_any = true
+warn_unused_ignores = true
+show_error_codes = true
+pretty = true
+namespace_packages = true
+files = [
+    "langgraph_checkpoint_cassandra",
+    "tests",
+]
+
+[[tool.mypy.overrides]]
+module = [
+  "cassandra.*",
+  "cassandra_asyncio.*",
+  "cassandra_asyncio_driver.*",
+  "aiofiles",
+  "aiofiles.*",
+  "msgpack",
+  "msgpack.*",
+]
+ignore_missing_imports = true
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

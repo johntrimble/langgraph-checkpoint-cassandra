@@ -1,0 +1,61 @@
+[[migration]]
+version = 1
+name = "initial_schema"
+description = "Create initial initial_schema"
+statements = [
+  """
+  CREATE KEYSPACE IF NOT EXISTS ${keyspace}
+  WITH replication = {'class': 'SimpleStrategy', 'replication_factor': ${replication_factor}}
+  """,
+  """
+  CREATE TABLE IF NOT EXISTS ${keyspace}.checkpoints (
+    thread_id ${thread_id_type},
+    checkpoint_ns TEXT,
+    checkpoint_id ${checkpoint_id_type},
+    parent_checkpoint_id ${checkpoint_id_type},
+    type TEXT,
+    checkpoint BLOB,
+    metadata BLOB,
+
+    -- maps for efficient querying on metadata
+    metadata_text map<text, text>,
+    metadata_int map<text, bigint>,
+    metadata_double map<text, double>,
+    metadata_bool map<text, boolean>,
+    metadata_null set<text>,
+
+    PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id)
+  ) WITH CLUSTERING ORDER BY (checkpoint_ns ASC, checkpoint_id DESC)
+    AND compaction = {'class': 'UnifiedCompactionStrategy'}
+  """,
+  """
+  CREATE INDEX IF NOT EXISTS idx_metadata_text_entries ON ${keyspace}.checkpoints (ENTRIES(metadata_text)) USING 'StorageAttachedIndex'
+  """,
+  """
+  CREATE INDEX IF NOT EXISTS idx_metadata_int_entries ON ${keyspace}.checkpoints (ENTRIES(metadata_int)) USING 'StorageAttachedIndex'
+  """,
+  """
+  CREATE INDEX IF NOT EXISTS idx_metadata_double_entries ON ${keyspace}.checkpoints (ENTRIES(metadata_double)) USING 'StorageAttachedIndex'
+  """,
+  """
+  CREATE INDEX IF NOT EXISTS idx_metadata_bool_entries ON ${keyspace}.checkpoints (ENTRIES(metadata_bool)) USING 'StorageAttachedIndex'
+  """,
+  """
+  CREATE INDEX IF NOT EXISTS idx_metadata_null_values ON ${keyspace}.checkpoints (VALUES(metadata_null)) USING 'StorageAttachedIndex'
+  """,
+  """
+  CREATE TABLE IF NOT EXISTS ${keyspace}.checkpoint_writes (
+      thread_id ${thread_id_type},
+      checkpoint_ns TEXT,
+      checkpoint_id ${checkpoint_id_type},
+      task_id TEXT,
+      task_path TEXT,
+      idx INT,
+      channel TEXT,
+      type TEXT,
+      value BLOB,
+      PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id, task_id, idx)
+  ) WITH CLUSTERING ORDER BY (checkpoint_ns ASC, checkpoint_id DESC, task_id ASC, idx ASC)
+    AND compaction = {'class': 'UnifiedCompactionStrategy'}
+  """
+]

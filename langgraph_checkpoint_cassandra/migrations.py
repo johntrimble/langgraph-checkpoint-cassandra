@@ -6,10 +6,15 @@ from __future__ import annotations
 
 import hashlib
 import logging
-import textwrap
+import string
 import time
+import tomllib
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from importlib import resources
+from pathlib import Path
+from typing import Any
 
 from cassandra.cluster import Session
 
@@ -18,44 +23,6 @@ logger = logging.getLogger(__name__)
 DEFAULT_KEYSPACE = "langgraph_checkpoints"
 MIGRATION_LOCK_TTL = 300  # 5 minutes
 MIGRATION_LOCK_KEY = "schema_migration_lock"
-
-# Default migrations embedded in the code
-DEFAULT_MIGRATIONS = {
-    1: {
-        "name": "initial_schema",
-        "description": "Create initial schema with checkpoints and checkpoint_writes tables",
-        "statements": [
-            textwrap.dedent("""
-                CREATE TABLE IF NOT EXISTS {keyspace}.checkpoints (
-                    thread_id {thread_id_type},
-                    checkpoint_ns TEXT,
-                    checkpoint_id {checkpoint_id_type},
-                    parent_checkpoint_id {checkpoint_id_type},
-                    type TEXT,
-                    checkpoint BLOB,
-                    metadata BLOB,
-                    PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id)
-                ) WITH CLUSTERING ORDER BY (checkpoint_ns ASC, checkpoint_id DESC)
-                  AND compaction = {{'class': 'UnifiedCompactionStrategy'}}
-            """).strip(),
-            textwrap.dedent("""
-                CREATE TABLE IF NOT EXISTS {keyspace}.checkpoint_writes (
-                    thread_id {thread_id_type},
-                    checkpoint_ns TEXT,
-                    checkpoint_id {checkpoint_id_type},
-                    task_id TEXT,
-                    task_path TEXT,
-                    idx INT,
-                    channel TEXT,
-                    type TEXT,
-                    value BLOB,
-                    PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id, task_id, idx)
-                ) WITH CLUSTERING ORDER BY (checkpoint_ns ASC, checkpoint_id DESC, task_id ASC, idx ASC)
-                  AND compaction = {{'class': 'UnifiedCompactionStrategy'}}
-            """).strip(),
-        ],
-    }
-}
 
 
 @dataclass
@@ -68,53 +35,57 @@ class Migration:
     checksum: str
     statements: list[str]
 
-    @classmethod
-    def from_dict(cls, version: int, migration_def: dict) -> Migration:
-        """Create a Migration from a dictionary definition."""
-        name = migration_def.get("name", f"migration_{version}")
-        description = migration_def.get("description", "")
-        statements = migration_def.get("statements", [])
 
-        # Calculate checksum from statements
-        content = "\n".join(statements)
-        checksum = hashlib.sha256(content.encode()).hexdigest()
+def _compute_migration_checksum(statements: list[str]) -> str:
+    """
+    Compute a SHA256 checksum for migration statements.
 
-        return cls(
-            version=version,
-            name=name,
-            description=description,
-            checksum=checksum,
-            statements=statements,
-        )
+    Args:
+        statements: List of SQL statements (should be raw templates, not formatted)
+
+    Returns:
+        Hexadecimal checksum string
+    """
+    content = "\n".join(statements)
+    return hashlib.sha256(content.encode()).hexdigest()
 
 
 class MigrationManager:
-    """Manages schema migrations for Cassandra checkpoint saver."""
-
     def __init__(
         self,
         session: Session,
         keyspace: str = DEFAULT_KEYSPACE,
-        thread_id_type: str = "text",
-        checkpoint_id_type: str = "uuid",
         replication_factor: int = 3,
+        checkpoint_id_type: str = "uuid",
+        thread_id_type: str = "uuid",
     ):
         """
         Initialize the migration manager.
 
         Args:
             session: Cassandra session
-            keyspace: Keyspace name
-            thread_id_type: Type for thread_id column ("text" [default], "uuid")
-            checkpoint_id_type: Type for checkpoint_id column ("uuid" [default], "text")
+            keyspace: Keyspace name (defaults to session's keyspace)
             replication_factor: Replication factor for the keyspace (default: 3, use 1 for single-node clusters)
+            checkpoint_id_type: Type for checkpoint_id column ("uuid" [default], "text")
+            thread_id_type: Type for thread_id column ("uuid" [default], "text")
         """
         self.session = session
-        self.keyspace = keyspace
-        self.thread_id_type = thread_id_type.upper()
-        self.checkpoint_id_type = checkpoint_id_type.upper()
+        self.keyspace = keyspace if keyspace is not None else session.keyspace
+        if not self.keyspace:
+            raise ValueError(
+                "MigrationManager requires a target keyspace. "
+                "Provide one explicitly or connect the session to a keyspace."
+            )
         self.replication_factor = replication_factor
-        self.migrations: list[Migration] = []
+        self.migrations: list[Migration] = self._load_migrations(
+            migrations_template=self._get_default_migrations_template(),
+            template_params={
+                "keyspace": self.keyspace,
+                "checkpoint_id_type": checkpoint_id_type.upper(),
+                "thread_id_type": thread_id_type.upper(),
+                "replication_factor": replication_factor,
+            },
+        )
 
     def _ensure_migration_tables(self) -> None:
         """Ensure the migration tracking tables exist."""
@@ -126,7 +97,7 @@ class MigrationManager:
 
         # Create migrations table if it doesn't exist
         self.session.execute(f"""
-            CREATE TABLE IF NOT EXISTS {self.keyspace}.checkpoint_migrations (
+            CREATE TABLE IF NOT EXISTS {self.keyspace}.migrations (
                 version INT PRIMARY KEY,
                 name TEXT,
                 description TEXT,
@@ -138,7 +109,7 @@ class MigrationManager:
 
         # Create migration lock table if it doesn't exist
         self.session.execute(f"""
-            CREATE TABLE IF NOT EXISTS {self.keyspace}.checkpoint_migration_locks (
+            CREATE TABLE IF NOT EXISTS {self.keyspace}.migration_locks (
                 lock_key TEXT PRIMARY KEY,
                 locked_at TIMESTAMP,
                 locked_by TEXT,
@@ -166,7 +137,7 @@ class MigrationManager:
         # Try to acquire lock using LWT
         result = self.session.execute(
             f"""
-            INSERT INTO {self.keyspace}.checkpoint_migration_locks
+            INSERT INTO {self.keyspace}.migration_locks
             (lock_key, locked_at, locked_by, expires_at)
             VALUES (%s, %s, %s, %s)
             IF NOT EXISTS
@@ -181,7 +152,7 @@ class MigrationManager:
     def _release_lock(self) -> None:
         """Release the migration lock."""
         self.session.execute(
-            f"DELETE FROM {self.keyspace}.checkpoint_migration_locks WHERE lock_key = %s",
+            f"DELETE FROM {self.keyspace}.migration_locks WHERE lock_key = %s",
             (MIGRATION_LOCK_KEY,),
         )
 
@@ -189,12 +160,12 @@ class MigrationManager:
         """Get the set of already applied migration versions."""
         try:
             result = self.session.execute(
-                f"SELECT version FROM {self.keyspace}.checkpoint_migrations"
+                f"SELECT version FROM {self.keyspace}.migrations"
             )
             return {row.version for row in result}
         except Exception as e:
             logger.debug(f"Could not get applied migrations: {e}")
-            return set()
+            raise
 
     def _record_migration(
         self,
@@ -206,7 +177,7 @@ class MigrationManager:
 
         self.session.execute(
             f"""
-            INSERT INTO {self.keyspace}.checkpoint_migrations
+            INSERT INTO {self.keyspace}.migrations
             (version, name, description, checksum, applied_at, execution_time_ms)
             VALUES (%s, %s, %s, %s, %s, %s)
             """,
@@ -220,43 +191,67 @@ class MigrationManager:
             ),
         )
 
-    def load_migrations(self) -> None:
+    def _get_default_migrations_template(self) -> Any:
+        migrations_path = Path(__file__).with_name("migrations.toml")
+        if migrations_path.is_file():
+            with migrations_path.open("rb") as fp:
+                migrations_data = tomllib.load(fp)
+        else:
+            try:
+                migrations_resource = resources.files(
+                    "langgraph_checkpoint_cassandra"
+                ).joinpath("migrations.toml")
+            except FileNotFoundError as exc:  # pragma: no cover - defensive
+                raise FileNotFoundError(
+                    "migrations.toml not found alongside package or in resources"
+                ) from exc
+            with migrations_resource.open("rb") as fp:
+                migrations_data = tomllib.load(fp)
+        return migrations_data
+
+    def _load_migrations(
+        self, migrations_template: Any, template_params: Mapping
+    ) -> list[Migration]:
         """
         Load default embedded migrations.
 
         Migrations are defined in DEFAULT_MIGRATIONS and automatically
         formatted with keyspace name and column types.
         """
-        migrations_data = DEFAULT_MIGRATIONS
         logger.debug("Loading default embedded migrations")
 
-        self.migrations = []
+        raw_migrations = migrations_template.get("migration") or []
+        migrations = []
 
-        for version, migration_def in migrations_data.items():
-            if not isinstance(version, int):
-                logger.warning(
-                    f"Skipping migration with non-integer version: {version}"
-                )
-                continue
-
-            # Format statements with keyspace and column types
+        for migration_def in raw_migrations:
             if "statements" in migration_def:
-                formatted_statements = [
-                    stmt.format(
-                        keyspace=self.keyspace,
-                        thread_id_type=self.thread_id_type,
-                        checkpoint_id_type=self.checkpoint_id_type,
-                    )
-                    for stmt in migration_def["statements"]
-                ]
-                migration_def = {**migration_def, "statements": formatted_statements}
+                # Keep raw statements for checksum calculation
+                raw_statements = migration_def["statements"]
 
-            migration = Migration.from_dict(version, migration_def)
-            self.migrations.append(migration)
+                # Format statements for execution
+                formatted_statements = [
+                    string.Template(stmt).safe_substitute(**template_params)
+                    for stmt in raw_statements
+                ]
+
+                checksum = _compute_migration_checksum(formatted_statements)
+
+                # Create modified migration_def with formatted statements
+                formatted_migration_def = {
+                    **migration_def,
+                    "statements": formatted_statements,
+                }
+            else:
+                checksum = ""
+                formatted_migration_def = migration_def
+
+            migration = Migration(**formatted_migration_def, checksum=checksum)
+            migrations.append(migration)
 
         # Sort by version
-        self.migrations.sort(key=lambda m: m.version)
-        logger.info(f"Loaded {len(self.migrations)} migration(s)")
+        migrations.sort(key=lambda m: m.version)
+        logger.info(f"Loaded {len(migrations)} migration(s)")
+        return migrations
 
     def get_pending_migrations(self) -> list[Migration]:
         """Get the list of pending migrations that need to be applied."""
@@ -322,18 +317,14 @@ class MigrationManager:
         # Ensure migration tables exist
         self._ensure_migration_tables()
 
-        # Load migrations if not already loaded
-        if not self.migrations:
-            self.load_migrations()
-
-        # Get pending migrations
+        # Get pending migrations (initial check)
         pending = self.get_pending_migrations()
 
         if not pending:
             logger.info("No pending migrations")
             return 0
 
-        logger.info(f"Found {len(pending)} pending migrations")
+        logger.info(f"Found {len(pending)} pending migration(s)")
 
         # Try to acquire lock with retry
         start_wait = time.time()
@@ -352,11 +343,21 @@ class MigrationManager:
             )
 
         try:
+            # Re-check pending migrations after acquiring lock
+            # (another process may have applied them while we waited)
+            pending = self.get_pending_migrations()
+
+            if not pending:
+                logger.info(
+                    "No pending migrations (already applied by another process)"
+                )
+                return 0
+
             # Apply migrations
             for migration in pending:
                 self.apply_migration(migration)
 
-            logger.info(f"Successfully applied {len(pending)} migrations")
+            logger.info(f"Successfully applied {len(pending)} migration(s)")
             return len(pending)
 
         finally:
@@ -379,7 +380,7 @@ class MigrationManager:
             result = self.session.execute(
                 f"""
                 SELECT version, name, checksum
-                FROM {self.keyspace}.checkpoint_migrations
+                FROM {self.keyspace}.migrations
                 """
             )
 

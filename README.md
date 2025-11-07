@@ -143,117 +143,129 @@ CREATE TABLE checkpoint_writes (
 
 ## Advanced Features
 
-### Queryable Metadata (Server-Side Filtering)
+### Metadata Filtering (Server-Side)
 
-For efficient filtering on specific metadata fields, you can designate fields as "queryable" when creating the checkpointer. This creates dedicated columns for fast filtering, with optional SAI (Storage Attached Index) indexes for maximum performance.
+All metadata fields are automatically queryable using server-side filtering with SAI (Storage Attached Index) indexes. The checkpointer stores metadata in flattened typed maps (`metadata_text`, `metadata_int`, `metadata_double`, `metadata_bool`, `metadata_null`) with ENTRIES indexes for efficient filtering.
+
+**Key features:**
+- **Automatic filtering**: No need to pre-declare queryable fields
+- **Nested metadata**: Use dot notation to filter on nested fields
+- **Literal dots**: Escape literal dots with backslash (`\.`)
+- **Type support**: Text, integers, floats, booleans, and null values
 
 ```python
-# Configure queryable metadata fields
 checkpointer = CassandraSaver(
     session,
-    keyspace='my_checkpoints',
-    queryable_metadata={
-        "user_id": str,               # Text field for user IDs
-        "step": int,                  # Integer field for step numbers
-        "source": str,                # Text field for source tracking
-        "tags": list[str],            # List of string tags
-        "attributes": dict[str, str], # Key-value attributes
-    },
-    indexed_metadata=["user_id", "source"]  # Only index these fields (optional)
+    keyspace='my_checkpoints'
 )
 checkpointer.setup()
 
-# Now you can filter efficiently on these fields
 config = {"configurable": {"thread_id": "my-thread"}}
 
-# Filter by user_id (server-side with SAI index, very fast)
+# Filter by top-level field
 user_checkpoints = list(checkpointer.list(
     config,
     filter={"user_id": "user-123"}
 ))
 
-# Filter by multiple fields (server-side)
+# Filter by nested field using dot notation
 specific_checkpoints = list(checkpointer.list(
     config,
-    filter={"user_id": "user-123", "source": "input"}
+    filter={"user.name": "alice", "user.age": 30}
 ))
 
-# Filter on list field with CONTAINS (checks if value is in list)
-tagged_checkpoints = list(checkpointer.list(
+# Filter by multiple fields (AND logic)
+filtered = list(checkpointer.list(
     config,
-    filter={"tags": "python"}  # Matches checkpoints where "python" is in tags list
+    filter={"source": "loop", "step": 5}
 ))
 
-# Filter on dict field (checks if key-value pair exists)
-prod_checkpoints = list(checkpointer.list(
+# Filter on keys with literal dots (use backslash escape)
+# For metadata {"file.txt": "content"}
+file_checkpoints = list(checkpointer.list(
     config,
-    filter={"attributes": {"env": "prod"}}  # Matches where attributes["env"] = "prod"
+    filter={"file\\.txt": "content"}
 ))
 
-# Filter on dict field by value only (checks if value exists in any key)
-us_checkpoints = list(checkpointer.list(
+# For nested metadata {"config": {"file.txt": "content"}}
+# Navigation dot is unescaped, literal dot is escaped
+config_checkpoints = list(checkpointer.list(
     config,
-    filter={"attributes": "us-east"}  # Matches where any value = "us-east"
-))
-
-# Mix queryable and non-queryable filters
-# Queryable fields use server-side filtering (fast)
-# Non-queryable fields use client-side filtering (slower)
-mixed = list(checkpointer.list(
-    config,
-    filter={
-        "user_id": "user-123",        # Server-side (queryable with index)
-        "step": 5,                    # Server-side (queryable without index, uses ALLOW FILTERING)
-        "custom_field": "value"       # Client-side (not queryable)
-    }
+    filter={"config.file\\.txt": "content"}
 ))
 ```
 
-**Supported types for queryable metadata:**
-- `str` - Text values
-- `int` - Integer values
-- `float` - Floating point values
-- `bool` - Boolean values
-- `dict[K, V]` - Dictionary/map values (supports key-value and value-only filtering)
-  - Examples: `dict[str, int]`, `dict[str, str]`, `dict[str, bool]`
-- `list[T]` - List values (supports CONTAINS operator)
-  - Examples: `list[int]`, `list[str]`, `list[float]`
-- `set[T]` - Set values (supports CONTAINS operator)
-  - Examples: `set[str]`, `set[int]`, `set[float]`
+**Supported types for metadata filtering:**
+- `str` - Text values (stored in `metadata_text` map)
+- `int` - Integer values (stored in `metadata_int` map)
+- `float` - Floating point values (stored in `metadata_double` map)
+- `bool` - Boolean values (stored in `metadata_bool` map)
+- `None` - Null values (stored in `metadata_null` set)
 
+**Note**: Complex types like lists, sets, and dicts are stored in the serialized `metadata` blob but are not directly filterable. To filter on these, extract them into simple fields in your metadata structure.
 
-**Index management with `indexed_metadata`:**
+#### Performance Optimization with Include/Exclude Patterns
 
-By default, **all queryable metadata fields get SAI indexes** for maximum query performance:
+For large-scale applications, you may want to control which metadata fields are stored in the indexed columns to optimize storage and write performance. Use `metadata_includes` and `metadata_excludes` parameters:
+
 ```python
+# Only index user-related fields and step counter
 checkpointer = CassandraSaver(
     session,
-    queryable_metadata={
-        "user_id": str,
-        "source": str,
-        "step": int,
-    }
-    # All three fields will be indexed (default behavior)
+    keyspace='my_checkpoints',
+    metadata_includes=["user.*", "step"]  # Only these fields will be indexed
 )
-```
+checkpointer.setup()
 
-To reduce storage overhead, use `indexed_metadata` to index only frequently-queried fields:
-```python
+# Alternatively, exclude sensitive fields from indexing
 checkpointer = CassandraSaver(
     session,
-    queryable_metadata={
-        "user_id": str,      # Will be indexed (in indexed_metadata)
-        "source": str,       # Will be indexed (in indexed_metadata)
-        "step": int,         # NOT indexed (queryable but slower)
-        "debug_info": str,   # NOT indexed (queryable but slower)
-    },
-    indexed_metadata=["user_id", "source"]  # Only index these two
+    keyspace='my_checkpoints',
+    metadata_excludes=["*.password", "*.secret", "*.token"]  # These won't be indexed
 )
+checkpointer.setup()
+
+# Combine both: include user fields but exclude passwords
+checkpointer = CassandraSaver(
+    session,
+    keyspace='my_checkpoints',
+    metadata_includes=["user.*", "session.*"],
+    metadata_excludes=["*.password", "*.token"]
+)
+checkpointer.setup()
 ```
 
-- **Indexed fields**: Fast queries using SAI index
-- **Non-indexed queryable fields**: Still filterable server-side, but uses `ALLOW FILTERING` (slower)
-- This allows many fields to be queryable while only indexing the most important ones
+**Pattern matching:**
+- Patterns use Unix shell-style wildcards (`fnmatch`)
+- `*` matches any sequence of characters: `"user.*"` matches `user.name`, `user.age`, etc.
+- `?` matches a single character
+- `[seq]` matches any character in seq
+- Exact matches: `"step"` matches only the field `step`
+
+**Priority rules:**
+1. If `metadata_includes` is specified, only fields matching at least one pattern are indexed
+2. Then, `metadata_excludes` removes matching fields (even if they matched an include pattern)
+3. If both are `None` (default), all fields are indexed
+
+**Important - Server-Side vs Client-Side Filtering:**
+
+Fields are automatically split into two categories when filtering:
+- **Indexed fields** (server-side): Filtered efficiently in Cassandra using SAI indexes
+  - All fields by default, or only those matching `metadata_includes` patterns
+  - Excluded if they match `metadata_excludes` patterns
+  - Very fast, scales to large datasets
+
+- **Non-indexed fields** (client-side): Filtered in Python after fetching from database
+  - Fields excluded by `metadata_excludes` patterns
+  - Fields not matching `metadata_includes` patterns
+  - Complex types (list, dict, set) - always client-side
+  - Still works correctly, but less efficient for large result sets
+
+**Performance implications:**
+- Server-side filters are applied first, minimizing data transfer
+- Client-side filters are applied to results after fetching
+- Use `metadata_includes`/`metadata_excludes` to control which fields are indexed
+- This optimizes storage overhead and write performance for high-cardinality metadata
 
 
 ### TTL (Time To Live)
