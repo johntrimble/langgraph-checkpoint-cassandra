@@ -6,9 +6,9 @@ import fnmatch
 import logging
 from collections.abc import AsyncIterator, Iterator, Sequence
 from contextlib import contextmanager
+from textwrap import dedent
 from typing import Any, Literal, get_args, get_origin
 from uuid import UUID
-from textwrap import dedent
 
 from cassandra.cluster import Cluster, Session
 from cassandra.query import (
@@ -26,6 +26,7 @@ from langgraph.checkpoint.base import (
     CheckpointTuple,
     get_checkpoint_id,
 )
+
 from langgraph_checkpoint_cassandra.migrations import MigrationManager
 
 logger = logging.getLogger(__name__)
@@ -34,6 +35,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_KEYSPACE = "langgraph_checkpoints"
 DEFAULT_CONTACT_POINTS = ["localhost"]
 DEFAULT_PORT = 9042
+
 
 def _escape_dots(key: str) -> str:
     r"""Escape dots in metadata keys to avoid conflicts with dot notation for nesting.
@@ -120,14 +122,18 @@ def _should_include_field(
     # Step 1: Check includes
     if includes is not None and len(includes) > 0:
         # If includes specified, field must match at least one pattern
-        matches_include = any(fnmatch.fnmatch(field_path, pattern) for pattern in includes)
+        matches_include = any(
+            fnmatch.fnmatch(field_path, pattern) for pattern in includes
+        )
         if not matches_include:
             return False
 
     # Step 2: Check excludes
     if excludes is not None and len(excludes) > 0:
         # If field matches any exclude pattern, exclude it
-        matches_exclude = any(fnmatch.fnmatch(field_path, pattern) for pattern in excludes)
+        matches_exclude = any(
+            fnmatch.fnmatch(field_path, pattern) for pattern in excludes
+        )
         if matches_exclude:
             return False
 
@@ -329,11 +335,11 @@ def _flatten_metadata(
         }
     """
     result = {
-        'metadata_text': {},
-        'metadata_int': {},
-        'metadata_double': {},
-        'metadata_bool': {},
-        'metadata_null': set(),
+        "metadata_text": {},
+        "metadata_int": {},
+        "metadata_double": {},
+        "metadata_bool": {},
+        "metadata_null": set(),
     }
 
     for key, value in metadata.items():
@@ -344,28 +350,28 @@ def _flatten_metadata(
         if value is None:
             # Check if field should be included before adding
             if _should_include_field(full_key, includes, excludes):
-                result['metadata_null'].add(full_key)
+                result["metadata_null"].add(full_key)
         elif isinstance(value, dict):
             # Recursively flatten nested dicts (pass includes/excludes through)
             nested = _flatten_metadata(value, full_key, includes, excludes)
             for map_name, entries in nested.items():
-                if map_name == 'metadata_null':
+                if map_name == "metadata_null":
                     result[map_name].update(entries)
                 else:
                     result[map_name].update(entries)
         elif isinstance(value, bool):
             # Check bool before int (bool is subclass of int in Python)
             if _should_include_field(full_key, includes, excludes):
-                result['metadata_bool'][full_key] = value
+                result["metadata_bool"][full_key] = value
         elif isinstance(value, int):
             if _should_include_field(full_key, includes, excludes):
-                result['metadata_int'][full_key] = value
+                result["metadata_int"][full_key] = value
         elif isinstance(value, float):
             if _should_include_field(full_key, includes, excludes):
-                result['metadata_double'][full_key] = value
+                result["metadata_double"][full_key] = value
         elif isinstance(value, str):
             if _should_include_field(full_key, includes, excludes):
-                result['metadata_text'][full_key] = value
+                result["metadata_text"][full_key] = value
         # Lists and other complex types are skipped - stay in metadata blob only
 
     return result
@@ -549,7 +555,10 @@ class CassandraSaver(BaseCheckpointSaver):
                 stmt.fetch_size = self.fetch_size
             self._prepared_statements[query] = stmt
 
-        if consistency is not None and getattr(stmt, "consistency_level", None) != consistency:
+        if (
+            consistency is not None
+            and getattr(stmt, "consistency_level", None) != consistency
+        ):
             stmt.consistency_level = consistency
 
         return stmt
@@ -750,7 +759,11 @@ class CassandraSaver(BaseCheckpointSaver):
             ```
         """
         mm = MigrationManager(
-            self.session, self.keyspace, replication_factor=replication_factor, thread_id_type=self.thread_id_type, checkpoint_id_type=self.checkpoint_id_type
+            self.session,
+            self.keyspace,
+            replication_factor=replication_factor,
+            thread_id_type=self.thread_id_type,
+            checkpoint_id_type=self.checkpoint_id_type,
         )
         mm.migrate()
 
@@ -926,8 +939,8 @@ class CassandraSaver(BaseCheckpointSaver):
         if limit is not None:
             try:
                 limit_val = int(limit)
-            except (TypeError, ValueError):
-                raise ValueError(f"limit must be an integer, got {limit!r}")
+            except (TypeError, ValueError) as err:
+                raise ValueError(f"limit must be an integer, got {limit!r}") from err
             if limit_val < 0:
                 raise ValueError("limit cannot be negative")
 
@@ -991,7 +1004,9 @@ class CassandraSaver(BaseCheckpointSaver):
 
         return query, query_params
 
-    def _deserialize_checkpoint_row(self, row: Any) -> tuple[Checkpoint, CheckpointMetadata]:
+    def _deserialize_checkpoint_row(
+        self, row: Any
+    ) -> tuple[Checkpoint, CheckpointMetadata]:
         """Deserialize checkpoint and metadata from a database row.
 
         Args:
@@ -1028,7 +1043,9 @@ class CassandraSaver(BaseCheckpointSaver):
             checkpoint, metadata = self._deserialize_checkpoint_row(row)
 
             # Apply client-side filters (for non-indexed fields)
-            if non_indexed_filters and not _matches_filter(metadata, non_indexed_filters):
+            if non_indexed_filters and not _matches_filter(
+                metadata, non_indexed_filters
+            ):
                 # Skip this checkpoint - doesn't match non-indexed filters
                 continue
 
@@ -1454,7 +1471,7 @@ class CassandraSaver(BaseCheckpointSaver):
             >>> list(config, filter={"config.file\\.txt": "content"})
         """
         if not config:
-            return
+            return iter(())
 
         thread_id_str = config["configurable"]["thread_id"]
         thread_id = self._convert_thread_id(thread_id_str)
@@ -1464,7 +1481,7 @@ class CassandraSaver(BaseCheckpointSaver):
         indexed_filters, non_indexed_filters = self._split_and_validate_filters(filter)
 
         if limit == 0:
-            return
+            return iter(())
 
         server_side_limit = limit if not non_indexed_filters else None
 
@@ -1483,21 +1500,21 @@ class CassandraSaver(BaseCheckpointSaver):
         )
 
         if not checkpoints_to_return:
-            return
+            return iter(())
 
         # Fetch writes for all checkpoints
         writes_by_checkpoint = self._fetch_writes_for_checkpoints(
             thread_id, checkpoint_ns, checkpoints_to_return
         )
 
-        # Build and yield checkpoint tuples
-        for checkpoint_tuple in self._build_checkpoint_tuples_from_writes(
+        # Build and return checkpoint tuples iterator
+        result = self._build_checkpoint_tuples_from_writes(
             checkpoints_to_return,
             writes_by_checkpoint,
             thread_id_str,
             checkpoint_ns,
-        ):
-            yield checkpoint_tuple
+        )
+        return iter(result or [])
 
     def put(
         self,

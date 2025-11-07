@@ -5,15 +5,16 @@ Migration system for Cassandra checkpoint saver.
 from __future__ import annotations
 
 import hashlib
-from importlib import resources
 import logging
-from pathlib import Path
 import string
 import time
+import tomllib
+from collections.abc import Mapping
 from dataclasses import dataclass
 from datetime import UTC, datetime
-import tomllib
-from typing import Any, Mapping
+from importlib import resources
+from pathlib import Path
+from typing import Any
 
 from cassandra.cluster import Session
 
@@ -22,6 +23,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_KEYSPACE = "langgraph_checkpoints"
 MIGRATION_LOCK_TTL = 300  # 5 minutes
 MIGRATION_LOCK_KEY = "schema_migration_lock"
+
 
 @dataclass
 class Migration:
@@ -82,7 +84,7 @@ class MigrationManager:
                 "checkpoint_id_type": checkpoint_id_type.upper(),
                 "thread_id_type": thread_id_type.upper(),
                 "replication_factor": replication_factor,
-            }
+            },
         )
 
     def _ensure_migration_tables(self) -> None:
@@ -207,7 +209,9 @@ class MigrationManager:
                 migrations_data = tomllib.load(fp)
         return migrations_data
 
-    def _load_migrations(self, migrations_template: Any, template_params: Mapping) -> list[Migration]:
+    def _load_migrations(
+        self, migrations_template: Any, template_params: Mapping
+    ) -> list[Migration]:
         """
         Load default embedded migrations.
 
@@ -344,7 +348,9 @@ class MigrationManager:
             pending = self.get_pending_migrations()
 
             if not pending:
-                logger.info("No pending migrations (already applied by another process)")
+                logger.info(
+                    "No pending migrations (already applied by another process)"
+                )
                 return 0
 
             # Apply migrations

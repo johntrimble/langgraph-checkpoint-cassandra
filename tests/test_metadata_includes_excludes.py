@@ -1,6 +1,5 @@
 """Tests for metadata includes/excludes functionality."""
 
-import pytest
 from langgraph_checkpoint_cassandra.cassandra_saver import (
     _flatten_metadata,
     _should_include_field,
@@ -56,9 +55,17 @@ class TestShouldIncludeField:
         assert _should_include_field("user.debug", None, ["debug.*"]) is True
 
         # Multiple exclude patterns
-        assert _should_include_field("user.password", None, ["*.password", "*.secret"]) is False
-        assert _should_include_field("api.secret", None, ["*.password", "*.secret"]) is False
-        assert _should_include_field("user.name", None, ["*.password", "*.secret"]) is True
+        assert (
+            _should_include_field("user.password", None, ["*.password", "*.secret"])
+            is False
+        )
+        assert (
+            _should_include_field("api.secret", None, ["*.password", "*.secret"])
+            is False
+        )
+        assert (
+            _should_include_field("user.name", None, ["*.password", "*.secret"]) is True
+        )
 
     def test_includes_and_excludes_together(self):
         """Test that includes and excludes work together correctly."""
@@ -68,8 +75,12 @@ class TestShouldIncludeField:
 
         assert _should_include_field("user.name", includes, excludes) is True
         assert _should_include_field("user.age", includes, excludes) is True
-        assert _should_include_field("user.password", includes, excludes) is False  # Exclude wins
-        assert _should_include_field("config.db", includes, excludes) is False  # Not in includes
+        assert (
+            _should_include_field("user.password", includes, excludes) is False
+        )  # Exclude wins
+        assert (
+            _should_include_field("config.db", includes, excludes) is False
+        )  # Not in includes
 
         # Include everything except sensitive fields
         includes = None
@@ -98,7 +109,10 @@ class TestShouldIncludeField:
 
         assert _should_include_field("config.database.host", includes, excludes) is True
         assert _should_include_field("config.database.port", includes, excludes) is True
-        assert _should_include_field("config.database.password", includes, excludes) is False
+        assert (
+            _should_include_field("config.database.password", includes, excludes)
+            is False
+        )
         assert _should_include_field("config.cache.ttl", includes, excludes) is False
 
 
@@ -164,9 +178,7 @@ class TestFlattenMetadataWithFilters:
 
         # Include only user fields, but exclude passwords
         result = _flatten_metadata(
-            metadata,
-            includes=["user.*"],
-            excludes=["*.password"]
+            metadata, includes=["user.*"], excludes=["*.password"]
         )
 
         assert result["metadata_text"]["user.name"] == "alice"
@@ -230,9 +242,7 @@ class TestFlattenMetadataWithFilters:
         }
 
         result = _flatten_metadata(
-            metadata,
-            includes=["config.*"],
-            excludes=["*.password"]
+            metadata, includes=["config.*"], excludes=["*.password"]
         )
 
         # All config fields should be included except passwords
@@ -298,7 +308,7 @@ class TestFlattenMetadataWithFilters:
         result = _flatten_metadata(
             metadata,
             includes=["user.*", "request.*", "step"],
-            excludes=["*.password_hash", "*.api_token", "debug.*"]
+            excludes=["*.password_hash", "*.api_token", "debug.*"],
         )
 
         # Should include

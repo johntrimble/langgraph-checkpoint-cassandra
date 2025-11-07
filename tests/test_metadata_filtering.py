@@ -4,7 +4,7 @@ Tests for metadata filtering with flattened dot notation.
 
 import pytest
 from cassandra.cluster import Cluster
-from langgraph.checkpoint.base import Checkpoint, CheckpointMetadata
+
 from langgraph_checkpoint_cassandra import CassandraSaver
 from tests.utils import drop_schema
 
@@ -73,34 +73,42 @@ def test_flatten_simple_metadata(saver):
         )
 
     # Test filter by string field
-    results = list(saver.list(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
-        filter={"source": "loop"}
-    ))
+    results = list(
+        saver.list(
+            {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+            filter={"source": "loop"},
+        )
+    )
     assert len(results) == 2
     assert all(r.metadata["source"] == "loop" for r in results)
 
     # Test filter by int field
-    results = list(saver.list(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
-        filter={"step": 2}
-    ))
+    results = list(
+        saver.list(
+            {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+            filter={"step": 2},
+        )
+    )
     assert len(results) == 1
     assert results[0].metadata["step"] == 2
 
     # Test filter by float field
-    results = list(saver.list(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
-        filter={"score": 0.9}
-    ))
+    results = list(
+        saver.list(
+            {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+            filter={"score": 0.9},
+        )
+    )
     assert len(results) == 1
     assert results[0].metadata["score"] == 0.9
 
     # Test multiple filters (AND logic)
-    results = list(saver.list(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
-        filter={"source": "loop", "step": 3}
-    ))
+    results = list(
+        saver.list(
+            {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+            filter={"source": "loop", "step": 3},
+        )
+    )
     assert len(results) == 1
     assert results[0].metadata["source"] == "loop"
     assert results[0].metadata["step"] == 3
@@ -151,34 +159,42 @@ def test_flatten_nested_metadata(saver):
         )
 
     # Test filter by nested string field
-    results = list(saver.list(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
-        filter={"user.name": "alice"}
-    ))
+    results = list(
+        saver.list(
+            {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+            filter={"user.name": "alice"},
+        )
+    )
     assert len(results) == 2
     assert all(r.metadata["user"]["name"] == "alice" for r in results)
 
     # Test filter by nested int field
-    results = list(saver.list(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
-        filter={"user.age": 25}
-    ))
+    results = list(
+        saver.list(
+            {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+            filter={"user.age": 25},
+        )
+    )
     assert len(results) == 1
     assert results[0].metadata["user"]["age"] == 25
 
     # Test filter by nested bool field
-    results = list(saver.list(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
-        filter={"config.debug": True}
-    ))
+    results = list(
+        saver.list(
+            {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+            filter={"config.debug": True},
+        )
+    )
     assert len(results) == 1
     assert results[0].metadata["config"]["debug"] is True
 
     # Test multiple nested filters
-    results = list(saver.list(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
-        filter={"user.name": "alice", "config.env": "prod"}
-    ))
+    results = list(
+        saver.list(
+            {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+            filter={"user.name": "alice", "config.env": "prod"},
+        )
+    )
     assert len(results) == 2
     for r in results:
         assert r.metadata["user"]["name"] == "alice"
@@ -218,18 +234,22 @@ def test_flatten_null_values(saver):
         )
 
     # Test filter by NULL value
-    results = list(saver.list(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
-        filter={"score": None}
-    ))
+    results = list(
+        saver.list(
+            {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+            filter={"score": None},
+        )
+    )
     assert len(results) == 2
     assert all(r.metadata["score"] is None for r in results)
 
     # Test combined filter with NULL and non-NULL
-    results = list(saver.list(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
-        filter={"score": None, "active": False}
-    ))
+    results = list(
+        saver.list(
+            {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+            filter={"score": None, "active": False},
+        )
+    )
     assert len(results) == 1
     assert results[0].metadata["score"] is None
     assert results[0].metadata["active"] is False
@@ -261,26 +281,32 @@ def test_flatten_keys_with_dots(saver):
     saver.put(config, checkpoint, metadata, {})
 
     # Filter by top-level key with literal dot (must escape the dot)
-    results = list(saver.list(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
-        filter={"file\\.txt": "content1"}
-    ))
+    results = list(
+        saver.list(
+            {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+            filter={"file\\.txt": "content1"},
+        )
+    )
     assert len(results) == 1
     assert results[0].metadata["file.txt"] == "content1"
 
     # Filter by another top-level key with literal dot
-    results = list(saver.list(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
-        filter={"config\\.json": "content2"}
-    ))
+    results = list(
+        saver.list(
+            {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+            filter={"config\\.json": "content2"},
+        )
+    )
     assert len(results) == 1
     assert results[0].metadata["config.json"] == "content2"
 
     # Filter by nested key with literal dot (navigation dot is unescaped, literal dot is escaped)
-    results = list(saver.list(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
-        filter={"nested.file\\.py": "content3"}
-    ))
+    results = list(
+        saver.list(
+            {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+            filter={"nested.file\\.py": "content3"},
+        )
+    )
     assert len(results) == 1
     assert results[0].metadata["nested"]["file.py"] == "content3"
 
@@ -333,18 +359,22 @@ def test_flatten_parents_field(saver):
         )
 
     # Filter by root parent (empty string key becomes "parents.")
-    results = list(saver.list(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
-        filter={"parents.": "checkpoint_root_123"}
-    ))
+    results = list(
+        saver.list(
+            {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+            filter={"parents.": "checkpoint_root_123"},
+        )
+    )
     assert len(results) == 2
     assert all(r.metadata["parents"].get("") == "checkpoint_root_123" for r in results)
 
     # Filter by subgraph parent
-    results = list(saver.list(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
-        filter={"parents.:task_xyz": "checkpoint_task_456"}
-    ))
+    results = list(
+        saver.list(
+            {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+            filter={"parents.:task_xyz": "checkpoint_task_456"},
+        )
+    )
     assert len(results) == 1
     assert results[0].metadata["parents"][":task_xyz"] == "checkpoint_task_456"
 
@@ -361,9 +391,11 @@ def test_no_filter_returns_all(saver):
         saver.put(config, checkpoint, metadata, {})
 
     # List without filter should return all
-    results = list(saver.list(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
-    ))
+    results = list(
+        saver.list(
+            {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+        )
+    )
     assert len(results) == 5
 
 
@@ -379,11 +411,13 @@ def test_filter_with_limit(saver):
         saver.put(config, checkpoint, metadata, {})
 
     # Filter with limit
-    results = list(saver.list(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
-        filter={"source": "loop"},
-        limit=5
-    ))
+    results = list(
+        saver.list(
+            {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+            filter={"source": "loop"},
+            limit=5,
+        )
+    )
     assert len(results) == 5
 
 
@@ -409,18 +443,22 @@ def test_deeply_nested_metadata(saver):
     saver.put(config, checkpoint, metadata, {})
 
     # Filter by deeply nested string
-    results = list(saver.list(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
-        filter={"level1.level2.level3.value": "deep"}
-    ))
+    results = list(
+        saver.list(
+            {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+            filter={"level1.level2.level3.value": "deep"},
+        )
+    )
     assert len(results) == 1
     assert results[0].metadata["level1"]["level2"]["level3"]["value"] == "deep"
 
     # Filter by deeply nested int
-    results = list(saver.list(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
-        filter={"level1.level2.level3.count": 42}
-    ))
+    results = list(
+        saver.list(
+            {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+            filter={"level1.level2.level3.count": 42},
+        )
+    )
     assert len(results) == 1
     assert results[0].metadata["level1"]["level2"]["level3"]["count"] == 42
 
@@ -450,40 +488,48 @@ def test_metadata_includes_integration(cassandra_session):
     saver.put(config, checkpoint, metadata, {})
 
     # Should be able to filter on user fields (they were included)
-    results = list(saver.list(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
-        filter={"user.name": "alice"}
-    ))
+    results = list(
+        saver.list(
+            {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+            filter={"user.name": "alice"},
+        )
+    )
     assert len(results) == 1
     assert results[0].metadata["user"]["name"] == "alice"
 
     # Should be able to filter on step (it was included)
-    results = list(saver.list(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
-        filter={"step": 5}
-    ))
+    results = list(
+        saver.list(
+            {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+            filter={"step": 5},
+        )
+    )
     assert len(results) == 1
 
     # CAN still filter on config.db (not indexed, but client-side filtering works)
-    results = list(saver.list(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
-        filter={"config.db": "postgres"}
-    ))
+    results = list(
+        saver.list(
+            {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+            filter={"config.db": "postgres"},
+        )
+    )
     assert len(results) == 1  # Client-side filtering found the match
     assert results[0].metadata["config"]["db"] == "postgres"
 
     # Client-side filtering also works for debug fields
-    results = list(saver.list(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
-        filter={"debug.trace": "xyz"}
-    ))
+    results = list(
+        saver.list(
+            {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+            filter={"debug.trace": "xyz"},
+        )
+    )
     assert len(results) == 1
     assert results[0].metadata["debug"]["trace"] == "xyz"
 
     # Metadata blob contains all fields
-    all_results = list(saver.list(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
-    ))
+    all_results = list(
+        saver.list({"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}})
+    )
     assert len(all_results) == 1
     assert all_results[0].metadata["config"]["db"] == "postgres"
     assert all_results[0].metadata["debug"]["trace"] == "xyz"
@@ -513,35 +559,43 @@ def test_metadata_excludes_integration(cassandra_session):
     saver.put(config, checkpoint, metadata, {})
 
     # Should be able to filter on non-excluded fields
-    results = list(saver.list(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
-        filter={"user.name": "alice"}
-    ))
+    results = list(
+        saver.list(
+            {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+            filter={"user.name": "alice"},
+        )
+    )
     assert len(results) == 1
 
-    results = list(saver.list(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
-        filter={"api.key": "public"}
-    ))
+    results = list(
+        saver.list(
+            {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+            filter={"api.key": "public"},
+        )
+    )
     assert len(results) == 1
 
     # CAN still filter on excluded fields (client-side filtering works)
-    results = list(saver.list(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
-        filter={"user.password": "secret123"}
-    ))
+    results = list(
+        saver.list(
+            {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+            filter={"user.password": "secret123"},
+        )
+    )
     assert len(results) == 1  # Client-side filtering found the match
 
-    results = list(saver.list(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
-        filter={"api.secret": "private"}
-    ))
+    results = list(
+        saver.list(
+            {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+            filter={"api.secret": "private"},
+        )
+    )
     assert len(results) == 1  # Client-side filtering found the match
 
     # Metadata blob contains all fields
-    all_results = list(saver.list(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}}
-    ))
+    all_results = list(
+        saver.list({"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}})
+    )
     assert len(all_results) == 1
     assert all_results[0].metadata["user"]["password"] == "secret123"  # Still in blob
     assert all_results[0].metadata["api"]["secret"] == "private"  # Still in blob
@@ -578,40 +632,52 @@ def test_metadata_includes_and_excludes_integration(cassandra_session):
     saver.put(config, checkpoint, metadata, {})
 
     # Should be able to filter on included, non-excluded user fields
-    results = list(saver.list(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
-        filter={"user.name": "alice"}
-    ))
+    results = list(
+        saver.list(
+            {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+            filter={"user.name": "alice"},
+        )
+    )
     assert len(results) == 1
 
-    results = list(saver.list(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
-        filter={"user.email": "alice@example.com"}
-    ))
+    results = list(
+        saver.list(
+            {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+            filter={"user.email": "alice@example.com"},
+        )
+    )
     assert len(results) == 1
 
     # CAN still filter on excluded fields (client-side filtering)
-    results = list(saver.list(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
-        filter={"user.password": "secret"}
-    ))
+    results = list(
+        saver.list(
+            {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+            filter={"user.password": "secret"},
+        )
+    )
     assert len(results) == 1  # Client-side filtering found the match
 
-    results = list(saver.list(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
-        filter={"user.token": "token123"}
-    ))
+    results = list(
+        saver.list(
+            {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+            filter={"user.token": "token123"},
+        )
+    )
     assert len(results) == 1  # Client-side filtering found the match
 
     # CAN still filter on fields not in includes (client-side filtering)
-    results = list(saver.list(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
-        filter={"config.db": "postgres"}
-    ))
+    results = list(
+        saver.list(
+            {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+            filter={"config.db": "postgres"},
+        )
+    )
     assert len(results) == 1  # Client-side filtering found the match
 
-    results = list(saver.list(
-        {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
-        filter={"step": 5}
-    ))
+    results = list(
+        saver.list(
+            {"configurable": {"thread_id": thread_id, "checkpoint_ns": ""}},
+            filter={"step": 5},
+        )
+    )
     assert len(results) == 1  # Client-side filtering found the match

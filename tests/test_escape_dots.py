@@ -1,4 +1,5 @@
-from hypothesis import given, strategies as st
+from hypothesis import given
+from hypothesis import strategies as st
 
 from langgraph_checkpoint_cassandra.cassandra_saver import _escape_dots, _unescape_dots
 

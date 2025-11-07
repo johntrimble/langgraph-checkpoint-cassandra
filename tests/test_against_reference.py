@@ -385,15 +385,11 @@ def savers(clusters):
 
     # Create sync saver and setup schema
     # Note: Metadata filtering is now automatic via flattened metadata columns
-    sync_saver = CassandraSaver(
-        sync_session, keyspace=sync_keyspace
-    )
+    sync_saver = CassandraSaver(sync_session, keyspace=sync_keyspace)
     sync_saver.setup(replication_factor=1)
 
     # Create async saver (with async session) and setup schema
-    async_saver = CassandraSaver(
-        async_session, keyspace=async_keyspace
-    )
+    async_saver = CassandraSaver(async_session, keyspace=async_keyspace)
     async_saver.setup(replication_factor=1)
 
     yield sync_saver, async_saver
