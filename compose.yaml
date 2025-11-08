@@ -62,11 +62,6 @@ services:
   # Single node Cassandra cluster
   cassandra:
     image: cassandra:5.0
-    ports:
-      # Cassandra client port
-      - "9042:9042"
-      # JMX port for management
-      - "7199:7199"
     environment:
       # Configure a single-node cluster
       - CASSANDRA_CLUSTER_NAME=PythonCassandraCluster

@@ -120,8 +120,23 @@ CREATE TABLE checkpoints (
     type TEXT,
     checkpoint BLOB,
     metadata BLOB,
+    -- Metadata indexing columns for efficient filtering
+    metadata_text map<text, text>,
+    metadata_int map<text, bigint>,
+    metadata_double map<text, double>,
+    metadata_bool map<text, boolean>,
+    metadata_null set<text>,
     PRIMARY KEY (thread_id, checkpoint_ns, checkpoint_id)
 ) WITH CLUSTERING ORDER BY (checkpoint_ns ASC, checkpoint_id DESC)
+```
+
+The table includes SAI (Storage Attached Index) indexes on the metadata collections:
+```sql
+CREATE CUSTOM INDEX checkpoints_metadata_text_idx ON checkpoints (ENTRIES(metadata_text)) USING 'StorageAttachedIndex';
+CREATE CUSTOM INDEX checkpoints_metadata_int_idx ON checkpoints (ENTRIES(metadata_int)) USING 'StorageAttachedIndex';
+CREATE CUSTOM INDEX checkpoints_metadata_double_idx ON checkpoints (ENTRIES(metadata_double)) USING 'StorageAttachedIndex';
+CREATE CUSTOM INDEX checkpoints_metadata_bool_idx ON checkpoints (ENTRIES(metadata_bool)) USING 'StorageAttachedIndex';
+CREATE CUSTOM INDEX checkpoints_metadata_null_idx ON checkpoints (VALUES(metadata_null)) USING 'StorageAttachedIndex';
 ```
 
 ### `checkpoint_writes` table
@@ -201,8 +216,6 @@ config_checkpoints = list(checkpointer.list(
 - `float` - Floating point values (stored in `metadata_double` map)
 - `bool` - Boolean values (stored in `metadata_bool` map)
 - `None` - Null values (stored in `metadata_null` set)
-
-**Note**: Complex types like lists, sets, and dicts are stored in the serialized `metadata` blob but are not directly filterable. To filter on these, extract them into simple fields in your metadata structure.
 
 #### Performance Optimization with Include/Exclude Patterns
 
