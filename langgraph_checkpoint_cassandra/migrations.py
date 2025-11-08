@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 DEFAULT_KEYSPACE = "langgraph_checkpoints"
 MIGRATION_LOCK_TTL = 300  # 5 minutes
 MIGRATION_LOCK_KEY = "schema_migration_lock"
+BASE_MODULE_NAME = "langgraph_checkpoint_cassandra"
 
 
 @dataclass
@@ -198,9 +199,9 @@ class MigrationManager:
                 migrations_data = tomllib.load(fp)
         else:
             try:
-                migrations_resource = resources.files(
-                    "langgraph_checkpoint_cassandra"
-                ).joinpath("migrations.toml")
+                migrations_resource = resources.files(BASE_MODULE_NAME).joinpath(
+                    "migrations.toml"
+                )
             except FileNotFoundError as exc:  # pragma: no cover - defensive
                 raise FileNotFoundError(
                     "migrations.toml not found alongside package or in resources"
