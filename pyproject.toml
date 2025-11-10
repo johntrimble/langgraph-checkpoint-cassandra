@@ -6,8 +6,9 @@ license = "MIT"
 readme = "README.md"
 requires-python = ">=3.12"
 dependencies = [
-    "langgraph>=0.6.9",
-    "cassandra-driver",
+    "langgraph>=1.0,<2.0",
+    "cassandra-driver>=3.29.0,<4.0",
+    "cassandra-asyncio-driver~=0.1.4",
 ]
 
 [project.urls]
@@ -22,8 +23,6 @@ module-root = ""
 
 [dependency-groups]
 dev = [
-    "cassandra-driver>=3.29.2",
-    "cassandra-asyncio-driver>=0.1.4",
     "hypothesis>=6.140.3",
     "pytest>=8.4.2",
     "pytest-asyncio>=1.2.0",

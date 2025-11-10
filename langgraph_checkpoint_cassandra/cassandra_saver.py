@@ -7,7 +7,7 @@ import logging
 from collections.abc import AsyncIterator, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from textwrap import dedent
-from typing import Any, Literal, TypedDict, cast, get_args, get_origin
+from typing import Any, Literal, TypedDict, cast
 from uuid import UUID
 
 from cassandra.cluster import Cluster, Session
@@ -388,105 +388,9 @@ def _flatten_metadata(
     return result
 
 
-def _python_type_to_cql_type(python_type: type) -> str:
-    """
-    Convert Python type to Cassandra CQL type string.
-
-    Supports nested collections like list[int], dict[str, int], set[str], etc.
-
-    Args:
-        python_type: Python type (str, int, float, bool, dict, list, set, or parameterized versions)
-
-    Returns:
-        CQL type string
-
-    Raises:
-        ValueError: If type is not supported
-
-    Examples:
-        >>> _python_type_to_cql_type(str)
-        'TEXT'
-        >>> _python_type_to_cql_type(int)
-        'BIGINT'
-        >>> _python_type_to_cql_type(list[int])
-        'LIST<BIGINT>'
-        >>> _python_type_to_cql_type(dict[str, int])
-        'MAP<TEXT, BIGINT>'
-        >>> _python_type_to_cql_type(set[str])
-        'SET<TEXT>'
-    """
-    type_mapping = {
-        str: "TEXT",
-        int: "BIGINT",
-        float: "DOUBLE",
-        bool: "BOOLEAN",
-    }
-
-    # Check simple types first
-    if python_type in type_mapping:
-        return type_mapping[python_type]
-
-    # Handle parameterized collection types (e.g., list[int], dict[str, int])
-    origin = get_origin(python_type)
-    if origin is not None:
-        args = get_args(python_type)
-
-        if origin is list:
-            if args:
-                # list[T] -> LIST<cql_type(T)>
-                inner_type = _python_type_to_cql_type(args[0])
-                return f"LIST<{inner_type}>"
-            else:
-                # Unparameterized list -> LIST<TEXT>
-                return "LIST<TEXT>"
-
-        elif origin is set:
-            if args:
-                # set[T] -> SET<cql_type(T)>
-                inner_type = _python_type_to_cql_type(args[0])
-                return f"SET<{inner_type}>"
-            else:
-                # Unparameterized set -> SET<TEXT>
-                return "SET<TEXT>"
-
-        elif origin is dict:
-            if args and len(args) >= 2:
-                # dict[K, V] -> MAP<cql_type(K), cql_type(V)>
-                key_type = _python_type_to_cql_type(args[0])
-                value_type = _python_type_to_cql_type(args[1])
-                return f"MAP<{key_type}, {value_type}>"
-            else:
-                # Unparameterized dict -> MAP<TEXT, TEXT>
-                return "MAP<TEXT, TEXT>"
-
-    # Fallback for unparameterized dict, list, set
-    if python_type is dict:
-        return "MAP<TEXT, TEXT>"
-    elif python_type is list:
-        return "LIST<TEXT>"
-    elif python_type is set:
-        return "SET<TEXT>"
-
-    raise ValueError(
-        f"Unsupported type: {python_type}. "
-        f"Supported types are: str, int, float, bool, dict, list, set, "
-        f"and parameterized versions like list[int], dict[str, int], set[str]"
-    )
-
-
 class CassandraSaver(BaseCheckpointSaver):
     """
     Cassandra-based checkpoint saver implementation.
-
-    This implementation uses a two-table design:
-    - checkpoints: Stores full serialized checkpoints
-    - checkpoint_writes: Stores pending writes
-
-    Features:
-    - Native BLOB storage (no base64 encoding needed)
-    - Optional TTL support for automatic cleanup
-    - Prepared statements for optimal performance
-    - Tunable consistency levels
     """
 
     def __init__(
@@ -780,29 +684,6 @@ class CassandraSaver(BaseCheckpointSaver):
 
         logger.info("✓ Checkpoint schema ready")
 
-    @staticmethod
-    def _to_uuid(checkpoint_id: str | None) -> UUID | None:
-        """
-        Convert checkpoint_id string to UUID object for Cassandra UUID columns.
-
-        Args:
-            checkpoint_id: Checkpoint ID as string (UUID format)
-
-        Returns:
-            UUID object, or None if checkpoint_id is None or empty
-
-        Raises:
-            ValueError: If checkpoint_id is not a valid UUID
-        """
-        if not checkpoint_id:
-            return None
-        try:
-            return UUID(checkpoint_id)
-        except ValueError as e:
-            raise ValueError(
-                f"checkpoint_id must be a valid UUID string. Got: {checkpoint_id}"
-            ) from e
-
     def _convert_checkpoint_id(self, checkpoint_id: str | None) -> str | UUID | None:
         """
         Convert checkpoint_id string to appropriate type based on configuration.
@@ -1007,7 +888,6 @@ class CassandraSaver(BaseCheckpointSaver):
             query_params.append(before_id)
 
         # Build final query
-        # No ALLOW FILTERING needed - SAI indexes on metadata columns handle filtering efficiently
         if limit_val is not None:
             query_parts.append(f"LIMIT {limit_val}")
 
