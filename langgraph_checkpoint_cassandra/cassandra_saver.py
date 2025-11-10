@@ -7,7 +7,7 @@ import logging
 from collections.abc import AsyncIterator, Iterator, Mapping, Sequence
 from contextlib import contextmanager
 from textwrap import dedent
-from typing import Any, Literal, TypedDict, cast, get_args, get_origin
+from typing import Any, Literal, TypedDict, cast
 from uuid import UUID
 
 from cassandra.cluster import Cluster, Session
@@ -391,16 +391,6 @@ def _flatten_metadata(
 class CassandraSaver(BaseCheckpointSaver):
     """
     Cassandra-based checkpoint saver implementation.
-
-    This implementation uses a two-table design:
-    - checkpoints: Stores full serialized checkpoints
-    - checkpoint_writes: Stores pending writes
-
-    Features:
-    - Native BLOB storage (no base64 encoding needed)
-    - Optional TTL support for automatic cleanup
-    - Prepared statements for optimal performance
-    - Tunable consistency levels
     """
 
     def __init__(

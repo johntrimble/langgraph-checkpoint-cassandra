@@ -8,11 +8,6 @@ Implementation of LangGraph CheckpointSaver that uses Apache Cassandra.
 pip install langgraph-checkpoint-cassandra
 ```
 
-For async operations, also install the async Cassandra driver:
-```bash
-pip install cassandra-asyncio-driver
-```
-
 ## Usage
 
 ### Important Note
@@ -98,11 +93,6 @@ async def main():
 # Run async code
 import asyncio
 asyncio.run(main())
-```
-
-**Note:** Async operations require the [cassandra-asyncio-driver](https://github.com/U-238/cassandra-asyncio-driver) package. Install with:
-```bash
-pip install cassandra-asyncio-driver
 ```
 
 ## Schema
